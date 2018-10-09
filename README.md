@@ -17,18 +17,24 @@ A typical application involves making sense of a massive collection of PGN files
 Perhaps you have downloaded countless PGN file over the years. Start by going to
 your downloads folder;
 
+<pre>
 cd \Users\Bill\Downloads
+</pre>
 
 This assumes Windows, but PGN2LINE is written in fairly idiomatic modern C++ and
 should work just as well on other desktop platforms.
 
 Now create a text file listing all the PGN files under this directory;
 
+<pre>
 dir/b/s >pgnlist.txt
+</pre>
 
 Now apply PGN2LINE, this is where the magic happens;
 
+<pre>
 pgn2line -l pgnlist.txt bigfile.lpgn
+</pre>
 
 The -l command line parameter simply indicates pgnlist.txt is a list of PGN
 files, without that flag pgn2line expects as input a single PGN file.
@@ -38,14 +44,16 @@ in a special one game per line format. The extension .lpgn is just a suggestion.
 Exact duplicates (and empty games) are removed. The games are all sorted neatly.
 To convert into something your other chess software can use simply;
 
+<pre>
 line2pgn bigfile.lpgn bigfile.pgn
+</pre>
 
-For extra credit, program "tournaments" in this suite operates on .lpgn files
+For extra credit, program *tournaments* in this suite operates on .lpgn files
 and produces a nice report of the tournaments present. It's possible to edit
 this report easily to create whitelist files, blacklist files and fixuplist
 files. These files are useful for repeating the whole process with filters
 in place to select or reject specific tournaments, and also to improve tournament
-event and site information. Dig ruther into the details below if you are
+event and site information. Dig further into the details below if you are
 interested in this.
 
 Details
@@ -57,9 +65,12 @@ for the text (say) "Forster". The grep output will be a valid one game per line
 file comprising all games featuring that text - which includes all games played
 by anyone named Forster.
 
-Another example, in a Nakamura-Carlsen game, the format includes the text
-"Nakamura-Carlsen". Search for all lines with that text and you get all such
-games ready for immediate conversion back into PGN.
+Another example, in a Nakamura-Carlsen game, the format used will generate the
+text "Nakamura-Carlsen" as part of the line prefix. Search for all lines with
+that text and you get all such games ready for immediate conversion back into PGN.
+
+By way of contrast, text searching in PGN games can only ever find fragments of
+games, with no immediate way of accessing the containing game.
 
 Usage:
 
@@ -76,8 +87,6 @@ pgn2line [-l] [-y year_before] [+y year_after] [-w whitelist | -b blacklist]
 </pre>
 
 Output is all games found in one game per line format, sorted for maxium utility.
-
-Program line2pgn converts back to PGN format.
 
 Whitelist, blacklist and fixuplist are all text files listing tournaments in the 
 following format;
@@ -97,9 +106,8 @@ For example
 This will apply the simple transformation Event->"23rd German Open" and Site->"Berlin, Germany"
 For the moment Events and/or Sites with embedded @ characters are not accommodated.
 
-Also line2pgn, a program to convert back to pgn.
-
-And tournaments, a program to convert the line format into a tournament list. This list can be
+The program suite also includes *line2pgn*, a program to convert back to pgn, and *tournaments*,
+a program to convert the line format into a tournament list. This list can be
 in the same format as the whitelist/blacklist/fixuplist greatly simplifying preparation of
 such lists.
 
@@ -141,9 +149,12 @@ content. Usually the different content will be due to annotations, so keep longe
 
 TODO - Events and/or Sites with embedded @ characters are not accommodated by the
 whitelist, blacklist and fixuplist files, extend the tournament list syntax used by
-those files with an appropriate extension to allow that
- eg "@#2008 John@Smith.com Open#Berlin" -> if the first character is a '@' then the 2nd
-	character replaces @ as the Event/Site separator.
+those files with an appropriate extension to allow that. One idea to allow this is
+<pre>
+"@#2008 John@Smith.com Open#Berlin"
+</pre>
+The concept here is that if the first charracter is a '@' then the 2nd character
+replaces @ as the Event/Site separator.
 
 TODO - A simple and useful enhancement would be to allow player name pairs in the
 fixuplist.  Any line that didn't match the yyyy event@site syntax would be considered
