@@ -56,6 +56,23 @@ in place to select or reject specific tournaments, and also to improve tournamen
 event and site information. Dig further into the details below if you are
 interested in this.
 
+Finally for now, the program suite also has (from V1.1) a program wordsearch
+which is basically a poor man's grep -w (not every Windows user has access to
+a grep program). So
+
+<pre>
+wordsearch Carlsen bigfile.lpgn carlsen.lpgn
+line2pgn carlsen.lpgn carlsen.pgn
+wordsearch Carlsen-Nakamura bigfile.lpgn carlsen-nakamura.lpgn
+line2pgn carlsen-nakamura.lpgn carlsen-nakamura.pgn
+</pre>
+
+This illustrates the beauty of .lpgn files, they are normal text files with
+a chess game on every line. Any tool that filters, shuffles, sorts etc. text
+files can operate on .lpgn files and the output will still be a text file
+with a chess game on every line, that converts easily to PGN with program
+line2pgn.
+
 Details
 =======
 
