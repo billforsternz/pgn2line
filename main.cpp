@@ -111,10 +111,11 @@
    Define (only) one of the following options to select which program to build
 */
 
-#define PGN2LINE        // Convert one or more PGN files into a single file in our new format
+#define PGN2LINE        // Convert one or more PGN files into a single file in our new format//
 //#define LINE2PGN      // Convert back to PGN
 //#define TOURNAMENTS   // A simple utility for extracting tournament names from line file
 //#define DISKSORT      // Just for testing our disksort() 
+//#define WORDSEARCH    // A poor man's grep -w
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -142,6 +143,7 @@ static void tournaments( std::string fin, std::string fout, bool bare=false );
 static bool read_tournament_list( std::string fin, std::vector<std::string> &lines );
 static bool test_date_format( const std::string &date,char separator );
 static bool refine_sort( std::string fin, std::string fout );
+static void word_search( bool case_insignificant, std::string word, std::string fin, std::string fout );
 
 int main( int argc, const char *argv[] )
 {
@@ -157,6 +159,33 @@ int main( int argc, const char *argv[] )
         return -1;
     }
     disksort(argv[1],argv[2]);
+    return 0;
+#endif
+
+#ifdef WORDSEARCH
+    int arg_idx=1;
+    bool case_insignificant=false;
+    bool ok = true;
+    if( argc>1 && std::string(argv[1]) == "-i" )
+    {
+        case_insignificant = true;
+        argc--;
+        arg_idx=2;
+    }
+    if( argc<3 || argc>4 )
+        ok = false;
+    if( !ok )
+    {
+        printf(
+            "Simple text file search for words. Useful for filtering .lpgn files for\n"
+            "specific players, events etc.\n"
+            "Usage:\n"
+            " wordsearch [-i] word input.txt [output.txt]\n"
+            "-i flag requests a case insignificant search\n"
+        );
+        return -1;
+    }
+    word_search( case_insignificant, argv[arg_idx],argv[arg_idx+1],argc==4?argv[arg_idx+2]:"");
     return 0;
 #endif
 
@@ -213,12 +242,12 @@ int main( int argc, const char *argv[] )
     std::string fixup_file;
     bool ok = true;
 
-	// Unless one or both of these are set on the command line
+    // Unless one or both of these are set on the command line
     //  yyyy>=year_after && yyyy<=year_before is true
     int year_after=-10000, year_before=10000;
 
-#if 1	//testing
-	list_flag=true;
+#if 0   // for debugging / testing
+    list_flag=true;
     std::string fin("pgnlist-medium.txt");
     std::string fout("ref8.lpgn");
 #else
@@ -694,51 +723,69 @@ static void pgn2line( std::string fin, std::string fout,
         return;
     }
     int line_number=0;
-    enum {search,in_header,in_moves,done} state=search, old_state=search;
+    enum {search_for_header,start_header,in_header,process_header,
+          search_for_moves,in_moves,process_game,
+          process_game_and_exit,done} state=search_for_header;
     std::string line;
-	bool replay_line=false;
-	while( state != done )
+    bool next_line=true;
+    while( state != done )
     {
-        old_state = state;
-		if( !replay_line )
-		{
-			if( !std::getline(in, line) )
-			{
-				state = done;
-				if( old_state != done )
-                    printf( "Warning; File: %s No empty line at end\n", fin.c_str() );
-			}
-			else
-			{
-				// Strip out UTF-8 BOM mark (hex value: EF BB BF)
-				if (line_number == 0 && line[0] == -17 && line[1] == -69 && line[2] == -65)
-					line = line.substr(3);
-				util::ltrim(line);
-				util::rtrim(line);
-				line_number++;
-				if( std::string::npos != line.find('@') )	// a little optimisation, '@' chars are rare
-					util::replace_all(line, "@", "@$");     //  if it is there transform "@" -> "@$"
-															//  line2pgn reverts it back
-															//  (this avoids possible trouble with
-															//  false @H and @M special markers)
-			}
-		}
-		replay_line = false;
-		switch(state)
+
+        // Get next line (unless we haven't fully processed current line)
+        if( next_line )
+        {
+            if( !std::getline(in, line) )
+            {
+                if( state == in_moves )
+                {
+                    state = process_game_and_exit;
+                    printf( "Warning; File: %s, No empty line at end\n", fin.c_str() );
+                }
+                else
+                    state = done;
+            }
+            else
+            {
+                // Strip out UTF-8 BOM mark (hex value: EF BB BF)
+                if( line_number==0 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+                    line = line.substr(3);
+                util::ltrim(line);
+                util::rtrim(line);
+                line_number++;
+
+                // Escape out existing '@' characters
+                if( std::string::npos != line.find('@') )   // a little optimisation, '@' chars are rare
+                    util::replace_all(line, "@", "@$");     //  if it is there transform "@" -> "@$"
+                                                            //  line2pgn reverts it back
+                                                            //  (this avoids possible trouble with
+                                                            //  false @H and @M special markers)
+            }
+        }
+        next_line = false;  // state machine often involves stepping through states before going to next line
+
+        // State machine
+        switch( state )
         {
             default:
-			case done:
-			{
-				break;
-			}
+            case done:
+            {
+                state = done;
+                break;
+            }
 
-			case search:
+            case search_for_header:
             {
                 if( util::prefix(line,"[") && util::suffix(line,"]") )
-                {
-                    state = in_header;
-                    replay_line = true;     // process this line as header line
-                }
+                    state = start_header;
+                else
+                    next_line = true;
+                break;
+            }
+
+            case start_header:
+            {
+                game.clear();
+                state = in_header;
                 break;
             }
 
@@ -747,15 +794,36 @@ static void pgn2line( std::string fin, std::string fout,
                 if( util::prefix(line,"[") && util::suffix(line,"]") )
                 {
                     game.process_header_line(line);
+                    next_line = true;
                 }
                 else
                 {
-                    state = in_moves;
+                    // All headers are in, apply fixups
+                    if( fixups.size() > 0 )
+                        game.fixup_tournament(fixups);
+
+                    // Next get moves
+                    state = search_for_moves;
                     if( line != "" )
-                    {
                         printf( "Warning; File: %s Line: %d, No gap between header and moves\n", fin.c_str(), line_number );
-                        replay_line = true;  // process this line as moves line
-                    }
+                }
+                break;
+            }
+
+            case search_for_moves:
+            {
+                if( util::prefix(line,"[") && util::suffix(line,"]") )
+                {
+                    printf( "Warning; File: %s Line: %d, No moves to go with header\n", fin.c_str(), line_number );
+                    state = search_for_header;
+                }
+                else if( line != "" )
+                {
+                    state = in_moves;
+                }
+                else
+                {
+                    next_line = true;
                 }
                 break;
             }
@@ -763,24 +831,26 @@ static void pgn2line( std::string fin, std::string fout,
             case in_moves:
             {
                 if( line == "" )
-                    state = search;
+                {
+                    state = process_game;
+                }
                 else if( util::prefix(line,"[") && util::suffix(line,"\"]") )
                 {
-                    state = in_header;
+                    state = process_game;
                     printf( "Warning; File: %s Line: %d, No gap between games\n", fin.c_str(), line_number );
-                    replay_line = true;
                 }
                 else
                 {
                     game.process_moves_line( line );
+                    next_line = true;
                 }
                 break;
             }
-        }
-        if( old_state != state )
-        {
-            if( old_state == in_moves )
+
+            case process_game:
+            case process_game_and_exit:
             {
+                state = (state==process_game_and_exit ? done : search_for_header);
                 bool ok = (game.yyyy>=year_after && game.yyyy<=year_before);
                 if( ok )
                     ok = game.is_game_usable();
@@ -824,17 +894,7 @@ static void pgn2line( std::string fin, std::string fout,
 #endif
                     util::putline(out,line_out);
                 }
-            }
-            if( old_state == in_header )
-            {
-                if( fixups.size() > 0 )
-                    game.fixup_tournament(fixups);
-            }
-            if( state == in_header )
-            {
-                assert(replay_line);    // since replay_line is true we can clear the game and the
-                                        //  first header line will still be processed
-                game.clear();
+                break;
             }
         }
     }
@@ -1470,7 +1530,7 @@ static bool read_tournament_list( std::string fin, std::vector<std::string> &lin
             break;
         lines_read++;
         util::rtrim(line);
-        if( line.length() < 6 )	// shortest legit line is "0000 @" indicating bad year, empty site and event
+        if( line.length() < 6 ) // shortest legit line is "0000 @" indicating bad year, empty site and event
             ok = false;
         if( ok )
         {
@@ -1480,7 +1540,7 @@ static bool read_tournament_list( std::string fin, std::vector<std::string> &lin
         if( ok )
         {
             std::string year=line.substr(0,4);
-			if( std::string::npos != year.find_first_not_of("0123456789") )
+            if( std::string::npos != year.find_first_not_of("0123456789") )
                 ok = false;
         }
         if( ok )
@@ -1515,3 +1575,52 @@ static bool test_date_format( const std::string &date,char separator )
     }
     return ok;
 }
+
+// Poor man's grep -w
+static void word_search( bool case_insignificant, std::string word, std::string fin, std::string fout )
+{
+    std::ifstream in(fin.c_str());
+    if( !in )
+    {
+        printf( "Error; Cannot open file %s for reading\n", fin.c_str() );
+        return;
+    }
+    std::ostream* fp = &std::cout;
+    std::ofstream out;
+    if( fout != "" )
+    {
+        out.open(fout);
+        if( out )
+            fp = &out;
+        else
+        {
+            printf( "Error; Cannot open file %s for writing\n", fout.c_str() );
+            return;
+        }
+    }
+    if( case_insignificant )
+        word = util::toupper(word);
+    for(;;)
+    {
+        std::string line;
+        if( !std::getline(in,line) )
+            break;
+        std::string search_line = case_insignificant ? util::toupper(line) : line;
+        size_t offset=0;
+        while( std::string::npos != (offset=search_line.find(word,offset)) )
+        {
+            size_t next = offset+word.length();
+            char pre=' ', post=' ';
+            if( offset>0 )
+                pre = search_line[offset-1];
+            if( next+1 < search_line.length() )
+                post = search_line[next+1];
+            bool hit = (pre==' '||pre=='\'' || pre=='\"' || pre==',' || pre=='@' || pre=='\t')
+                       && (post==' '||post=='\'' || post=='\"' || post==',' || post=='@' || post=='\t');
+            if( hit )
+                util::putline(*fp,line);
+            offset = next;
+        }
+    }
+}
+
