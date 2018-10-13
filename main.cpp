@@ -211,12 +211,19 @@ int main( int argc, const char *argv[] )
     std::string blacklist_file;
     bool fixup_flag = false;
     std::string fixup_file;
+    bool ok = true;
 
-    // Unless one or both of these are set on the command line
+	// Unless one or both of these are set on the command line
     //  yyyy>=year_after && yyyy<=year_before is true
     int year_after=-10000, year_before=10000;
+
+#if 1	//testing
+	list_flag=true;
+    std::string fin("pgnlist-medium.txt");
+    std::string fout("ref8.lpgn");
+#else
+
     int arg_idx=1;
-    bool ok = true;
     while( ok && argc>3 )
     {
         if( std::string(argv[arg_idx]) == "-l" )
@@ -335,6 +342,7 @@ int main( int argc, const char *argv[] )
     }
     std::string fin(argv[arg_idx]);
     std::string fout(argv[arg_idx+1]);
+#endif
 
     // Read tournament files
     std::set<std::string> whitelist;
@@ -511,7 +519,7 @@ void Game::fixup_tournament( const std::map<std::string,std::string> &fixup_list
     {
         std::string to = it->second;
         auto offset = to.find('@');
-        assert( offset != std::string::std::npos );
+        assert( offset != std::string::npos );
         eventx = to.substr(5,offset-5);
         site   = to.substr(offset+1);
     }
@@ -686,23 +694,45 @@ static void pgn2line( std::string fin, std::string fout,
         return;
     }
     int line_number=0;
-    enum {first_time_thru,search,in_header,in_moves} state=first_time_thru, old_state=first_time_thru;
+    enum {search,in_header,in_moves,done} state=search, old_state=search;
     std::string line;
-    bool done=false;
-    while(!done)
+	bool replay_line=false;
+	while( state != done )
     {
-        bool replay_line=false;
         old_state = state;
-        switch(state)
+		if( !replay_line )
+		{
+			if( !std::getline(in, line) )
+			{
+				state = done;
+				if( old_state != done )
+                    printf( "Warning; File: %s No empty line at end\n", fin.c_str() );
+			}
+			else
+			{
+				// Strip out UTF-8 BOM mark (hex value: EF BB BF)
+				if (line_number == 0 && line[0] == -17 && line[1] == -69 && line[2] == -65)
+					line = line.substr(3);
+				util::ltrim(line);
+				util::rtrim(line);
+				line_number++;
+				if( std::string::npos != line.find('@') )	// a little optimisation, '@' chars are rare
+					util::replace_all(line, "@", "@$");     //  if it is there transform "@" -> "@$"
+															//  line2pgn reverts it back
+															//  (this avoids possible trouble with
+															//  false @H and @M special markers)
+			}
+		}
+		replay_line = false;
+		switch(state)
         {
             default:
-            case first_time_thru:
-            {
-                state = search;
-                break;
-            }
+			case done:
+			{
+				break;
+			}
 
-            case search:
+			case search:
             {
                 if( util::prefix(line,"[") && util::suffix(line,"]") )
                 {
@@ -805,25 +835,6 @@ static void pgn2line( std::string fin, std::string fout,
                 assert(replay_line);    // since replay_line is true we can clear the game and the
                                         //  first header line will still be processed
                 game.clear();
-            }
-        }
-        if( !replay_line )
-        {
-            if( !std::getline(in,line) )
-                done = true;
-            else
-            {
-                // Strip out UTF-8 BOM mark (hex value: EF BB BF)
-                if( line_number==0 && line[0]==-17 && line[1]==-69 && line[2]==-65 )
-                    line = line.substr(3);
-                util::ltrim(line);
-                util::rtrim(line);
-                line_number++;
-                if( std::string::npos != line.find('@') )   // a little optimisation, '@' chars are rare
-                    util::replace_all(line,"@","@$");       //  if it is there transform "@" -> "@$"
-                                                            //  line2pgn reverts it back
-                                                            //  (this avoids possible trouble with
-                                                            //  false @H and @M special markers)
             }
         }
     }
