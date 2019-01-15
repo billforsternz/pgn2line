@@ -31,6 +31,9 @@
      -w specifies a whitelist list of tournaments, discard games not from these tournaments
      -b specifies a blacklist list of tournaments, discard games from these tournaments
      -f specifies a list of tournament name fixups
+	 -r specifies smart reverse sort - yields most recent games first, smart because higher
+        rounds/boards are adjusted to come first both here and in the conventional sort
+        order
 
     Output is all games found in one game per line format, sorted for maxium utility.
 
@@ -111,7 +114,7 @@
    Define (only) one of the following options to select which program to build
 */
 
-#define PGN2LINE        // Convert one or more PGN files into a single file in our new format//
+#define PGN2LINE        // Convert one or more PGN files into a single file in our new format
 //#define LINE2PGN      // Convert back to PGN
 //#define TOURNAMENTS   // A simple utility for extracting tournament names from line file
 //#define DISKSORT      // Just for testing our disksort() 
@@ -133,6 +136,7 @@
 
 static void pgn2line( std::string fin, std::string fout,
                         bool append,
+                        bool reverse_order,
                         int year_before,
                         int year_after,
                         const std::set<std::string> &whitelist,
@@ -234,6 +238,7 @@ int main( int argc, const char *argv[] )
 #ifdef PGN2LINE
     // Command line processing
     bool list_flag = false;
+    bool reverse_flag = false;
     bool whitelist_flag = false;
     std::string whitelist_file;
     bool blacklist_flag = false;
@@ -257,6 +262,8 @@ int main( int argc, const char *argv[] )
     {
         if( std::string(argv[arg_idx]) == "-l" )
             list_flag = true;
+        else if( std::string(argv[arg_idx]) == "-r" )
+            reverse_flag = true;
         else if( util::prefix( std::string(argv[arg_idx]),"-f") )
         {
             fixup_flag = true;
@@ -343,7 +350,7 @@ int main( int argc, const char *argv[] )
         "\n"
         "Usage:\n"
         " pgn2line [-l] [-y year_before] [+y year_after] [-w whitelist | -b blacklist]\n"
-        "          [-f fixuplist] input output.lpgn\n"
+        "          [-f fixuplist] [-r] input output.lpgn\n"
         "\n"
         "-l indicates input is a text file that lists input pgn files\n"
         "   (otherwise input is a single pgn file)\n"
@@ -354,6 +361,9 @@ int main( int argc, const char *argv[] )
         "-b specifies a blacklist list of tournaments, discard games from any of\n"
         "   these tournaments\n"
         "-f specifies a list of tournament name fixups\n"
+		"-r specifies smart reverse sort - yields most recent games first, smart\n"
+		"   because higher rounds/boards are adjusted to come first both here and\n"
+		"   in the conventional sort order\n"
         "\n"
         "-w -b and -f files are all lists of tournaments in the following format\n"
         "\n"
@@ -418,6 +428,7 @@ int main( int argc, const char *argv[] )
     {
         pgn2line( fin, temp1_fout,
                     false,
+                    reverse_flag,
                     year_before,
                     year_after,
                     whitelist,
@@ -447,6 +458,7 @@ int main( int argc, const char *argv[] )
                 printf( "Processed %d files\r", file_number );
                 pgn2line( line, temp1_fout,
                             append,
+		                    reverse_flag,
                             year_before,
                             year_after,
                             whitelist,
@@ -461,9 +473,22 @@ int main( int argc, const char *argv[] )
     printf( "Sort complete\n");
     remove( temp1_fout.c_str() );
     printf( "Starting refinement sort\n");
-    refine_sort( temp2_fout, fout );
-    printf( "Refinement sort complete\n");
-    remove( temp2_fout.c_str() );
+	if( reverse_flag )
+	{
+		refine_sort( temp2_fout, temp1_fout );
+		printf( "Refinement sort complete\n");
+		remove( temp2_fout.c_str() );
+		printf( "Starting reversal sort\n");
+		disksort( temp1_fout, fout, true, false );
+		printf( "Reversal sort complete\n");
+		remove( temp1_fout.c_str() );
+	}
+	else
+	{
+		refine_sort( temp2_fout, fout );
+		printf( "Refinement sort complete\n");
+		remove( temp2_fout.c_str() );
+	}
     return 0;
 #endif
 }
@@ -476,10 +501,10 @@ public:
     void process_header_line( const std::string &line );
     void process_moves_line( const std::string &line );
     bool is_game_usable();
-    std::string get_game_as_line();
+    std::string get_game_as_line(bool reverse_order);
     void fixup_tournament( const std::map<std::string,std::string> &fixup_list );
     std::string get_yyyy_event_at_site();
-    std::string get_prefix();
+    std::string get_prefix(bool reverse_order);
     int yyyy;
 private:
     std::string get_event_header();
@@ -517,9 +542,9 @@ void Game::clear()
     move_txt_len = 0;
 }
 
-std::string Game::get_game_as_line()
+std::string Game::get_game_as_line(bool reverse_order)
 {
-    std::string s=get_prefix();
+    std::string s=get_prefix(reverse_order);
     s += "@H";
     s += get_event_header();
     s += "@H";
@@ -554,7 +579,7 @@ void Game::fixup_tournament( const std::map<std::string,std::string> &fixup_list
     }
 }
 
-std::string Game::get_prefix()
+std::string Game::get_prefix(bool reverse_order)
 {
     std::string event_site = eventx;
     event_site += ", ";
@@ -574,23 +599,35 @@ std::string Game::get_prefix()
     s += '-';
     s += day;
     s += ' ';
+
+	// eg Round = "3" -> "03" or if reverse order "97"
+	// eg Round = "3.1" -> "03.001" or if reverse order "97.999"
+	// The point is to make the text as usefully sortable as possible
     int offset = round.find_first_of('.');
     if( offset == std::string::npos )
     {
-        while( round.length() < 2 )
-            round = std::string("0") + round;
+		int iround = atoi(round.c_str());
+		if( reverse_order )
+			iround = 100-iround;
+		std::string temp = util::sprintf("%02d",iround);
+		s += temp;
     }
     else
     {
-        std::string front = round.substr(0,offset);
-        std::string back  = round.substr(offset+1);
-        while( front.length() < 2 )
-            front = std::string("0") + front;
-        while( back.length() < 3 )
-            back = std::string("0") + back;
-        round = front + std::string(".") + back;
+		std::string temp = round.substr(0,offset);
+		int iround1 = atoi(temp.c_str());
+		if( reverse_order )
+			iround1 = 100-iround1;
+		temp = util::sprintf("%02d",iround1);
+		s += temp;
+		s += '.';
+		temp = round.substr(offset+1);
+		int iround2 = atoi(temp.c_str());
+		if( reverse_order )
+			iround2 = 1000-iround2;
+		temp = util::sprintf("%03d",iround2);
+		s += temp;
     }
-    s += round;
     s += ' ';
     offset = white.find_first_of(",");
     if( offset != std::string::npos )
@@ -703,6 +740,7 @@ std::string Game::get_site_header()
 
 static void pgn2line( std::string fin, std::string fout,
                     bool append,
+                    bool reverse_order,
                     int year_before,
                     int year_after,
                     const std::set<std::string> &whitelist,
@@ -869,7 +907,7 @@ static void pgn2line( std::string fin, std::string fout,
                 }
                 if( ok )
                 {
-                    std::string line_out = game.get_game_as_line();
+                    std::string line_out = game.get_game_as_line(reverse_order);
 #if 0               // Windows/DOS sort.exe cannot cope with lines longer than 65000 characters, we used to
                     //  truncate lines for that reason - now we have our own disksort()
                     unsigned int maxlen = 65000;
@@ -885,7 +923,7 @@ static void pgn2line( std::string fin, std::string fout,
                                 offset = maxlen-apology.length();   // scan back didn't succeed, oh well
                             line_out = line_out.substr(0,offset) + apology;
                         }
-                        std::string prefix = game.get_prefix();
+                        std::string prefix = game.get_prefix(reverse_order);
                         printf( "Warning: Line longer than %u characters %s. File: %s Game prefix: %s\n",
                             maxlen,
                             truncate?"(-t flag set, so line was truncated)":"(invoke with -t to truncate such lines)",
@@ -1613,8 +1651,8 @@ static void word_search( bool case_insignificant, std::string word, std::string 
             char pre=' ', post=' ';
             if( offset>0 )
                 pre = search_line[offset-1];
-            if( next+1 < search_line.length() )
-                post = search_line[next+1];
+            if( next < search_line.length() )
+                post = search_line[next];
             bool hit = (pre==' '||pre=='\'' || pre=='\"' || pre==',' || pre=='@' || pre=='\t')
                        && (post==' '||post=='\'' || post=='\"' || post==',' || post=='@' || post=='\t');
             if( hit )

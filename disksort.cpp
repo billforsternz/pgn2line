@@ -24,7 +24,7 @@
 #include "util.h"
 #include "disksort.h"
 
-bool disksort( std::string fin, std::string fout, bool uniq )
+bool disksort( std::string fin, std::string fout, bool reverse, bool uniq )
 {
     std::ifstream in(fin.c_str());
     if( !in )
@@ -84,7 +84,10 @@ bool disksort( std::string fin, std::string fout, bool uniq )
         }
 
         // Sort it
-        std::sort( chunk.begin(), chunk.end() );
+		if( reverse )
+			std::sort( chunk.rbegin(), chunk.rend() );
+		else
+			std::sort( chunk.begin(), chunk.end() );
 
         // Read line by line from the input temporary file, merge sorting with this chunk and
         //  writing line by line to a new temporary file
@@ -101,7 +104,12 @@ bool disksort( std::string fin, std::string fout, bool uniq )
         {
             bool use_memory = memory_line_available;
             if( file_line_available && memory_line_available )
-                use_memory = (memory_line < file_line); // merge sort happens here
+			{  // merge sort happens here
+				if( reverse )
+					use_memory = (memory_line > file_line);
+				else
+					use_memory = (memory_line < file_line);
+			}
 
             // Next line is from file or from memory - if it's from file get next file line
             //  if it's from memory get next memory line
