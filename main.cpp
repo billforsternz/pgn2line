@@ -134,17 +134,18 @@
 #include "disksort.h"
 #include "util.h"
 
-static void pgn2line( std::string fin, std::string fout,
+static void pgn2line( std::string fin, std::string fout, std::string fout_diag,
                         bool append,
                         bool reverse_order,
                         int year_before,
                         int year_after,
                         const std::set<std::string> &whitelist,
                         const std::set<std::string> &blacklist,
-                        const std::map<std::string,std::string> &fixups );
+                        const std::map<std::string,std::string> &fixups,
+                        const std::map<std::string,std::string> &name_fixups );
 static void line2pgn( std::string fin, std::string fout );
 static void tournaments( std::string fin, std::string fout, bool bare=false );
-static bool read_tournament_list( std::string fin, std::vector<std::string> &lines );
+static bool read_tournament_list( std::string fin, std::vector<std::string> &tournaments, std::vector<std::string> *names=NULL  );
 static bool test_date_format( const std::string &date,char separator );
 static bool refine_sort( std::string fin, std::string fout );
 static void word_search( bool case_insignificant, std::string word, std::string fin, std::string fout );
@@ -387,6 +388,7 @@ int main( int argc, const char *argv[] )
     std::set<std::string> whitelist;
     std::set<std::string> blacklist;
     std::map<std::string,std::string> fixups;
+    std::map<std::string,std::string> name_fixups;
     if( whitelist_flag )
     {
         std::vector<std::string> temp;
@@ -401,19 +403,36 @@ int main( int argc, const char *argv[] )
         for( unsigned int i=0; ok && i<temp.size(); i++ )
             blacklist.insert(temp[i]);
     }
+    std::string fout_diag;
     if( ok && fixup_flag )
     {
         std::vector<std::string> temp;
-        ok = read_tournament_list( fixup_file, temp );
+        std::vector<std::string> names;
+        ok = read_tournament_list( fixup_file, temp, &names );
         if( ok && temp.size()%2 != 0 )
         {
-            printf( "Error; Odd number of lines in tournament fixup table, should be before and after pairs\n" );
+            printf( "Error; Odd number of tournaments in fixup table, should be before and after pairs\n" );
             ok = false;
         }
         else
         {
             for( unsigned int i=0; ok && i<temp.size(); i+=2 )
                 fixups.insert( std::pair<std::string,std::string>(temp[i],temp[i+1]) );
+        }
+        if( ok && names.size()%2 != 0 )
+        {
+            printf( "Error; Odd number of player names in fixup table, should be before and after pairs\n" );
+            ok = false;
+        }
+        else
+        {
+            if( names.size() > 0 )
+            {
+                fout_diag = fout + "-diag-name-fixups.txt";
+                printf( "All player name fixups will be listed in file %s\n", fout_diag.c_str() );
+            }
+            for( unsigned int i=0; ok && i<names.size(); i+=2 )
+                name_fixups.insert( std::pair<std::string,std::string>(names[i],names[i+1]) );
         }
     }
     if( !ok )
@@ -426,14 +445,16 @@ int main( int argc, const char *argv[] )
     std::string temp2_fout = util::sprintf( "%s-temp-filename-pgn2line-postsort-%05d.tmp", fout.c_str(), r2 );
     if( !list_flag )
     {
-        pgn2line( fin, temp1_fout,
+        pgn2line( fin, temp1_fout, fout_diag,
                     false,
                     reverse_flag,
                     year_before,
                     year_after,
                     whitelist,
                     blacklist,
-                    fixups );
+                    fixups,
+                    name_fixups
+            );
     }
     else
     {
@@ -456,14 +477,15 @@ int main( int argc, const char *argv[] )
             {
                 file_number++;
                 printf( "Processed %d files\r", file_number );
-                pgn2line( line, temp1_fout,
+                pgn2line( line, temp1_fout, fout_diag,
                             append,
 		                    reverse_flag,
                             year_before,
                             year_after,
                             whitelist,
                             blacklist,
-                            fixups );
+                            fixups,
+                            name_fixups );
             }
             append = true;
         }
@@ -503,8 +525,10 @@ public:
     bool is_game_usable();
     std::string get_game_as_line(bool reverse_order);
     void fixup_tournament( const std::map<std::string,std::string> &fixup_list );
+    void fixup_names( const std::map<std::string,std::string> &fixup_list, std::ofstream *p_out_diag );
     std::string get_yyyy_event_at_site();
     std::string get_prefix(bool reverse_order);
+    std::string get_description();
     int yyyy;
 private:
     std::string get_event_header();
@@ -579,6 +603,45 @@ void Game::fixup_tournament( const std::map<std::string,std::string> &fixup_list
     }
 }
 
+void Game::fixup_names( const std::map<std::string,std::string> &fixup_list, std::ofstream *p_out_diag )
+{
+    std::string t = get_yyyy_event_at_site();
+    int nbr_changes=0;
+    auto it1 = fixup_list.find(white);
+    auto it2 = fixup_list.find(black);
+    if( it1 != fixup_list.end()  || it2 != fixup_list.end() )
+    {
+        std::string before = get_description();
+        if( it1 != fixup_list.end() )
+        {
+            nbr_changes++;
+            std::string new_white = it1->second;
+            std::string from = "@H[White \"" + white + "\"]";
+            std::string to   = "@H[White \"" + new_white + "\"]";
+            util::replace_once( headers, from, to );
+            white = new_white;
+        }
+        if( it2 != fixup_list.end() )
+        {
+            nbr_changes++;
+            std::string new_black = it2->second;
+            std::string from = "@H[Black \"" + black + "\"]";
+            std::string to   = "@H[Black \"" + new_black + "\"]";
+            util::replace_once( headers, from, to );
+            black = new_black;
+        }
+        std::string after = get_description();
+        if( p_out_diag )
+        {
+            std::string
+            s = util::sprintf( "Name change%s; %s", nbr_changes>1?"s":"", before.c_str() );
+            util::putline(*p_out_diag,s);
+            s = util::sprintf( "%s       ->    %s", nbr_changes>1?" ":"", after.c_str() );
+            util::putline(*p_out_diag,s);
+        }
+    }
+}
+
 std::string Game::get_prefix(bool reverse_order)
 {
     std::string event_site = eventx;
@@ -631,13 +694,34 @@ std::string Game::get_prefix(bool reverse_order)
     s += ' ';
     offset = white.find_first_of(",");
     if( offset != std::string::npos )
-        white = white.substr(0,offset);
-    s += white;
+        s += white.substr(0,offset);
+    else
+        s += white;
     s += "-";
     offset = black.find_first_of(",");
     if( offset != std::string::npos )
-        black = black.substr(0,offset);
+        s += black.substr(0,offset);
+    else
+        s += black;
+    return s;
+}
+
+std::string Game::get_description()
+{
+    std::string s;
+    s = white;
+    s += "-";
     s += black;
+    s += " - ";
+    s += eventx;
+    s += ", ";
+    s += site;
+    s += ", ";
+    s += year;
+    s += '-';
+    s += month;
+    s += '-';
+    s += day;
     return s;
 }
 
@@ -653,6 +737,7 @@ bool Game::is_game_usable()
 void Game::process_header_line( const std::string &line )
 {
     bool event_site=false;
+    bool white_black=false;
     std::string key, value;
     int from = line.find_first_not_of(' ',1);
     int to   = line.find_first_of(' ');
@@ -666,18 +751,44 @@ void Game::process_header_line( const std::string &line )
             value = line.substr( from+1, (to-from)-1 );
             if( key == "Event" )
             {
-                eventx = value;
                 event_site = true;
+                util::trim(value);
+                eventx = value;
             }
             else if( key == "Site" )
             {
-                site = value;
                 event_site = true;
+                util::trim(value);
+                site = value;
             }
             else if( key == "White" )
+            {
+                white_black = true;
+                headers += "@H";
+                if( util::trim(value) )
+                {
+                    headers += "[White \"";
+                    headers += value;
+                    headers += "\"]";
+                }
+                else
+                    headers += line;
                 white = value;
+            }
             else if( key == "Black" )
+            {
+                white_black = true;
+                headers += "@H";
+                if( util::trim(value) )
+                {
+                    headers += "[Black \"";
+                    headers += value;
+                    headers += "\"]";
+                }
+                else
+                    headers += line;
                 black = value;
+            }
             else if( key == "Date" )
             {
                 bool ok=false;
@@ -704,7 +815,7 @@ void Game::process_header_line( const std::string &line )
                 result = value;
         }
     }
-    if( !event_site )
+    if( !event_site && !white_black )
     {
         headers += "@H";
         headers += line;
@@ -738,14 +849,15 @@ std::string Game::get_site_header()
     return s;
 }
 
-static void pgn2line( std::string fin, std::string fout,
+static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
                     bool append,
                     bool reverse_order,
                     int year_before,
                     int year_after,
                     const std::set<std::string> &whitelist,
                     const std::set<std::string> &blacklist,
-                    const std::map<std::string,std::string> &fixups )
+                    const std::map<std::string,std::string> &fixups,
+                    const std::map<std::string,std::string> &name_fixups )
 {
     Game game;
     std::ifstream in(fin.c_str());
@@ -760,6 +872,8 @@ static void pgn2line( std::string fin, std::string fout,
         printf( "Error; Cannot open file %s for %s\n", fout.c_str(), append?"appending":"writing" );
         return;
     }
+    std::ofstream out_diag( diag_fout.c_str(), append ? std::ios_base::app : std::ios_base::out );
+    std::ofstream *p_out_diag = out_diag ? &out_diag : NULL;
     int line_number=0;
     enum {search_for_header,start_header,in_header,process_header,
           search_for_moves,in_moves,process_game,
@@ -839,6 +953,9 @@ static void pgn2line( std::string fin, std::string fout,
                     // All headers are in, apply fixups
                     if( fixups.size() > 0 )
                         game.fixup_tournament(fixups);
+
+                    if( name_fixups.size() > 0 )
+                        game.fixup_names(name_fixups,p_out_diag);
 
                     // Next get moves
                     state = search_for_moves;
@@ -1551,7 +1668,7 @@ static bool refine_sort( std::string fin, std::string fout )
 
 
 // Read list of tournaments
-static bool read_tournament_list( std::string fin, std::vector<std::string> &lines )
+static bool read_tournament_list( std::string fin, std::vector<std::string> &tournaments, std::vector<std::string> *names  )
 {
     std::ifstream in(fin);
     if( !in )
@@ -1561,6 +1678,7 @@ static bool read_tournament_list( std::string fin, std::vector<std::string> &lin
     }
     int lines_read=0;
     bool ok=true;
+    bool last_was_name = false;
     while( ok )
     {
         std::string line;
@@ -1586,10 +1704,43 @@ static bool read_tournament_list( std::string fin, std::vector<std::string> &lin
             if( std::string::npos == line.find('@'))
                 ok = false;
         }
-        if( ok )
-            lines.push_back(line);
+        bool odd_line = (lines_read%2 == 1);    // first line is line 1, and is odd
+        if( odd_line )
+        {
+            if( ok )
+                tournaments.push_back(line);
+            else if( names )                // If names vector supplied, non-tournaments go into that
+            {
+                ok = true;
+                names->push_back(line);
+                last_was_name = true;
+            }
+            else
+                printf( "Error in tournament list file %s line %d: tournament not in expected \"yyyy Site@Event\" format\n", fin.c_str(), lines_read );
+        }
         else
-            printf( "Error in tournament list file %s line %d: Tournament not in expected \"yyyy Site@Event\" format\n", fin.c_str(), lines_read );
+        {
+            if( last_was_name && !ok )
+            {
+                ok = true;
+                names->push_back(line);
+            }
+            else if( last_was_name && ok )
+            {
+                ok = false;
+                printf( "Error in tournament list file %s line %d: Expected player name as second in name pair, but got tournament in \"yyyy Site@Event\" format\n", fin.c_str(), lines_read );
+            }
+            else if( ok )
+                tournaments.push_back(line);
+            else
+            {
+                if( names )
+                    printf( "Error in tournament list file %s line %d: second tournament in pair not in expected \"yyyy Site@Event\" format\n", fin.c_str(), lines_read );
+                else
+                    printf( "Error in tournament list file %s line %d: tournament not in expected \"yyyy Site@Event\" format\n", fin.c_str(), lines_read );
+            }
+            last_was_name = false;
+        }
     }
     return ok;
 }
