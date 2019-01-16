@@ -103,11 +103,6 @@
      eg "@#2008 John@Smith.com Open#Berlin" -> if the first character is a '@' then the 2nd
         character replaces @ as the Event/Site separator.
 
-    TODO - A simple and useful enhancement would be to allow player name pairs in the
-    fixuplist.  Any line that didn't match the yyyy event@site syntax would be considered
-    a player name. Then the before and after player name pairs would be checked and
-    possibly applied for every "White" and "Black" name in the file
-
 */
 
 /*
