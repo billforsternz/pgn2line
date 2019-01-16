@@ -1656,8 +1656,14 @@ static void word_search( bool case_insignificant, std::string word, std::string 
             bool hit = (pre==' '||pre=='\'' || pre=='\"' || pre==',' || pre=='@' || pre=='\t')
                        && (post==' '||post=='\'' || post=='\"' || post==',' || post=='@' || post=='\t');
             if( hit )
+            {
                 util::putline(*fp,line);
-            offset = next;
+                break;
+            }
+            else
+            {
+                offset = next;
+            }
         }
     }
 }
