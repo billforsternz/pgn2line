@@ -84,6 +84,35 @@ void rtrim( std::string &s )
         s.erase(final_char_offset+1);
 }
 
+// Try for a little efficiency, return true if changes made
+bool trim( std::string &s )
+{
+    bool changed=false;
+    size_t len = s.length();
+    if( len > 0 )
+    {
+        size_t first_char_offset = s.find_first_not_of(" \n\r\t");
+        if( first_char_offset == std::string::npos )
+        {
+            s.clear();  // string is all whitespace
+            return true;
+        }
+        else if( first_char_offset > 0 )
+        {
+            s = s.substr(first_char_offset);   // effect left trim
+            changed = true;
+        }
+        size_t final_char_offset = s.find_last_not_of(" \n\r\t");
+        if( final_char_offset != std::string::npos && final_char_offset < len-1 )
+        {
+            s.erase(final_char_offset+1);     // effect right trim
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+
 void replace_all( std::string &s, const std::string from, const std::string to )
 {
     size_t next = 0;
@@ -96,6 +125,13 @@ void replace_all( std::string &s, const std::string from, const std::string to )
             s.replace(offset,from.length(),to);
         next = offset+to.length();
     }
+}
+
+void replace_once( std::string &s, const std::string from, const std::string to )
+{
+    size_t offset = s.find(from);
+    if( offset != std::string::npos )
+        s.replace(offset,from.length(),to);
 }
 
 void split( std::string &s, std::vector<std::string> &fields )
