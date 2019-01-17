@@ -109,9 +109,10 @@
    Define (only) one of the following options to select which program to build
 */
 
-#define PGN2LINE        // Convert one or more PGN files into a single file in our new format
+//#define PGN2LINE        // Convert one or more PGN files into a single file in our new format
 //#define LINE2PGN      // Convert back to PGN
 //#define TOURNAMENTS   // A simple utility for extracting tournament names from line file
+#define PLAYERS       // A utility for extracting player names from line file
 //#define DISKSORT      // Just for testing our disksort() 
 //#define WORDSEARCH    // A poor man's grep -w
 
@@ -129,7 +130,7 @@
 #include "disksort.h"
 #include "util.h"
 
-static void pgn2line( std::string fin, std::string fout, std::string fout_diag,
+static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
                         bool append,
                         bool reverse_order,
                         int year_before,
@@ -140,6 +141,7 @@ static void pgn2line( std::string fin, std::string fout, std::string fout_diag,
                         const std::map<std::string,std::string> &name_fixups );
 static void line2pgn( std::string fin, std::string fout );
 static void tournaments( std::string fin, std::string fout, bool bare=false );
+static void players( std::string fin, std::string fout, bool bare, bool dups_only );
 static bool read_tournament_list( std::string fin, std::vector<std::string> &tournaments, std::vector<std::string> *names=NULL  );
 static bool test_date_format( const std::string &date,char separator );
 static bool refine_sort( std::string fin, std::string fout );
@@ -147,6 +149,8 @@ static void word_search( bool case_insignificant, std::string word, std::string 
 
 int main( int argc, const char *argv[] )
 {
+    util::tests();
+
 #ifdef DISKSORT
     bool ok = (argc==3);
     if( !ok )
@@ -213,6 +217,44 @@ int main( int argc, const char *argv[] )
         return -1;
     }
     tournaments( argv[arg_idx], argc==2?"":argv[arg_idx+1], bare );
+    return 0;
+#endif
+
+#ifdef PLAYERS
+    int arg_idx=1;
+    bool bare=false;
+    bool dups_only=false;
+    bool ok = true;
+
+    while( ok && argc>2 )
+    {
+        if( std::string(argv[arg_idx]) == "-b" )
+            bare = true;
+        else if( std::string(argv[arg_idx]) == "-d" )
+            dups_only = true;
+        else
+            break;
+        argc--;
+        arg_idx++;
+    }
+    if( argc<2 || argc>3 )
+        ok = false;
+    if( !ok )
+    {
+        printf(
+            "Extract player names from pgn files (or lpgn files created by pgn2line)\n"
+            "Usage:\n"
+            " players [-b] [-d] input.pgn|lpgn [output.txt]\n"
+            "\n"
+            "-b requests bare format suitable for use in a pgn2line fixup file\n"
+            "-d requests only names with duplicate surnames present\n"
+            "\n"
+            "Output is sorted, format is name : count (or just name if -b flag)\n"
+            "Names without commas are highlighted by adding a \"@ \" prefix\n"
+        );
+        return -1;
+    }
+    players( argv[arg_idx], argc==2?"":argv[arg_idx+1], bare, dups_only );
     return 0;
 #endif
 
@@ -368,6 +410,9 @@ int main( int argc, const char *argv[] )
         "In the case of the fixuplist there must be an even number of lines in the\n"
         "file because the file is interpreted as a list of before and after pairs\n"
         "\n"
+        "Pairs of before and after player names are now allowed in the fixup file,\n"
+        "player names are identified as those strings NOT in yyyy Event@Site format\n"
+        "\n"
         "Output is all games found in one game per line format, sorted. The .lpgn\n"
         "extension shown is just a suggested convention\n"
         "\n"
@@ -398,7 +443,7 @@ int main( int argc, const char *argv[] )
         for( unsigned int i=0; ok && i<temp.size(); i++ )
             blacklist.insert(temp[i]);
     }
-    std::string fout_diag;
+    std::string diag_fout;
     if( ok && fixup_flag )
     {
         std::vector<std::string> temp;
@@ -423,8 +468,8 @@ int main( int argc, const char *argv[] )
         {
             if( names.size() > 0 )
             {
-                fout_diag = fout + "-diag-name-fixups.txt";
-                printf( "All player name fixups will be listed in file %s\n", fout_diag.c_str() );
+                diag_fout = fout + "-diag-name-fixups.txt";
+                printf( "All player name fixups will be listed in file %s\n", diag_fout.c_str() );
             }
             for( unsigned int i=0; ok && i<names.size(); i+=2 )
                 name_fixups.insert( std::pair<std::string,std::string>(names[i],names[i+1]) );
@@ -440,7 +485,7 @@ int main( int argc, const char *argv[] )
     std::string temp2_fout = util::sprintf( "%s-temp-filename-pgn2line-postsort-%05d.tmp", fout.c_str(), r2 );
     if( !list_flag )
     {
-        pgn2line( fin, temp1_fout, fout_diag,
+        pgn2line( fin, temp1_fout, diag_fout,
                     false,
                     reverse_flag,
                     year_before,
@@ -472,7 +517,7 @@ int main( int argc, const char *argv[] )
             {
                 file_number++;
                 printf( "Processed %d files\r", file_number );
-                pgn2line( line, temp1_fout, fout_diag,
+                pgn2line( line, temp1_fout, diag_fout,
                             append,
 		                    reverse_flag,
                             year_before,
@@ -485,7 +530,7 @@ int main( int argc, const char *argv[] )
             append = true;
         }
     }
-    printf( "\nStarting sort\n");
+    printf( "%sStarting sort\n", list_flag?"\n":"" );   // list_flag = newline needed
     disksort( temp1_fout, temp2_fout );
     printf( "Sort complete\n");
     remove( temp1_fout.c_str() );
@@ -867,7 +912,13 @@ static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
         printf( "Error; Cannot open file %s for %s\n", fout.c_str(), append?"appending":"writing" );
         return;
     }
-    std::ofstream out_diag( diag_fout.c_str(), append ? std::ios_base::app : std::ios_base::out );
+    std::ofstream out_diag;
+    if( diag_fout != "" )
+    {
+        out_diag.open( diag_fout.c_str(), append ? std::ios_base::app : std::ios_base::out );
+        if( !out_diag )
+            printf( "Warning; Cannot open diagnostic file %s for writing\n", diag_fout.c_str() );
+    }
     std::ofstream *p_out_diag = out_diag ? &out_diag : NULL;
     int line_number=0;
     enum {search_for_header,start_header,in_header,process_header,
@@ -1344,6 +1395,128 @@ static void tournaments( std::string fin, std::string fout, bool bare )
         std::string s;
         s = util::sprintf( "%d total game%s", total_games, total_games==1?"":"s" );
         util::putline(*fp,s);
+    }
+}
+
+
+static void players( std::string fin, std::string fout, bool bare, bool dups_only )
+{
+    std::ifstream in(fin.c_str());
+    if( !in )
+    {
+        printf( "Error; Cannot open file %s for reading\n", fin.c_str() );
+        return;
+    }
+    std::ostream* fp = &std::cout;
+    std::ofstream out;
+    if( fout != "" )
+    {
+        out.open(fout);
+        if( out )
+            fp = &out;
+        else
+        {
+            printf( "Error; Cannot open file %s for writing\n", fout.c_str() );
+            return;
+        }
+    }
+    std::string prefix1 = "[White \"";
+    std::string prefix2 = "[Black \"";
+    size_t prefix_len = prefix1.length();
+    assert( prefix_len == prefix2.length() );
+    std::string line;
+    std::map<std::string,int> names;
+
+    for(;;)
+    {
+        if( !std::getline(in,line) )
+            break;
+        std::string player_name;
+        std::string prefix = prefix1;
+        for( int i=0; i<2; i++ )
+        {
+            size_t offset = line.find(prefix);
+            if( offset != std::string::npos )
+            {
+                offset += prefix_len;
+                size_t offset2 = line.find("\"",offset);
+                if( offset2 != std::string::npos )
+                {
+                    player_name = line.substr(offset,offset2-offset);
+                    auto it = names.find(player_name);
+                    if( it == names.end() )
+                        names.insert( std::pair<std::string,int>(player_name,1) );
+                    else
+                        it->second++;
+                }
+            }
+            prefix = prefix2;
+        }
+    }
+    std::vector<std::string> recent_names;
+    std::vector<std::string> recent_surnames;
+    for( auto it=names.begin(); it!=names.end(); it++ )
+    {
+        std::string name = it->first.c_str();
+        int count  = it->second;
+        std::string surname = name;
+        size_t offset = name.find(',');
+        bool comma_present = (offset != std::string::npos);
+        if( comma_present )
+            surname = name.substr(0,offset);
+        std::string detail;
+        if( bare )
+            detail = util::sprintf( "%s%s", comma_present?"":"@ ", name.c_str() );
+        else
+            detail = util::sprintf( "%s%s: %d", comma_present?"":"@ ", name.c_str(), count );
+        if( !dups_only )
+            util::putline(*fp,detail);
+        else
+        {
+
+            // Always flush after last name
+            it++;
+            bool flush = (it == names.end());
+            it--;
+
+            // If empty, simply buffer for later
+            if( recent_surnames.size() == 0 )
+            {
+                recent_names.push_back( detail );
+                recent_surnames.push_back( surname );
+            }
+
+            // Else if not empty flush if surname changes
+            else
+            {
+                bool different = (surname != recent_surnames[recent_surnames.size()-1]);
+                if( different )
+                    flush = true;
+
+                // Else multiple matching names in a row
+                else
+                {
+                    recent_names.push_back( detail );
+                    recent_surnames.push_back( surname );
+                }
+            }
+
+            // If flush, dump multiple matching names in a row
+            if( flush )
+            {
+                if( recent_names.size() > 1 )
+                {
+                    for( auto it2=recent_names.begin(); it2!=recent_names.end(); it2++ )
+                        util::putline(*fp,*it2);
+                }
+
+                // Clear the buffer and add the latest line, possibly first of a run of matching lines
+                recent_names.clear();
+                recent_surnames.clear();
+                recent_names.push_back( detail );
+                recent_surnames.push_back( surname );
+            }
+        }
     }
 }
 
