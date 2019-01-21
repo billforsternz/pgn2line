@@ -26,6 +26,7 @@
               [-f fixuplist]  input output
 
      -l indicates input is a text file that lists input pgn files (else input is a pgn file)
+     -z indicates don't include zero length games (BYEs are unaffected)
      -y discard games unless they are played in year_before or earlier
      +y discard games unless they are played in year_after or later
      -w specifies a whitelist list of tournaments, discard games not from these tournaments
@@ -109,10 +110,10 @@
    Define (only) one of the following options to select which program to build
 */
 
-//#define PGN2LINE        // Convert one or more PGN files into a single file in our new format
+#define PGN2LINE        // Convert one or more PGN files into a single file in our new format
 //#define LINE2PGN      // Convert back to PGN
 //#define TOURNAMENTS   // A simple utility for extracting tournament names from line file
-#define PLAYERS       // A utility for extracting player names from line file
+//#define PLAYERS       // A utility for extracting player names from line file
 //#define DISKSORT      // Just for testing our disksort() 
 //#define WORDSEARCH    // A poor man's grep -w
 
@@ -133,6 +134,7 @@
 static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
                         bool append,
                         bool reverse_order,
+                        bool remove_zero_length,
                         int year_before,
                         int year_after,
                         const std::set<std::string> &whitelist,
@@ -275,6 +277,7 @@ int main( int argc, const char *argv[] )
 
 #ifdef PGN2LINE
     // Command line processing
+    bool remove_zero_length_flag = false;
     bool list_flag = false;
     bool reverse_flag = false;
     bool whitelist_flag = false;
@@ -296,12 +299,14 @@ int main( int argc, const char *argv[] )
 #else
 
     int arg_idx=1;
-    while( ok && argc>3 )
+    while( ok && argc>1 )
     {
         if( std::string(argv[arg_idx]) == "-l" )
             list_flag = true;
         else if( std::string(argv[arg_idx]) == "-r" )
             reverse_flag = true;
+        else if( std::string(argv[arg_idx]) == "-z" )
+            remove_zero_length_flag = true;
         else if( util::prefix( std::string(argv[arg_idx]),"-f") )
         {
             fixup_flag = true;
@@ -375,7 +380,7 @@ int main( int argc, const char *argv[] )
                 ok = false;
         }
         else
-            ok = false;
+            break;
         argc--;
         arg_idx++;
     }
@@ -392,6 +397,7 @@ int main( int argc, const char *argv[] )
         "\n"
         "-l indicates input is a text file that lists input pgn files\n"
         "   (otherwise input is a single pgn file)\n"
+        "-z indicates don't include zero length games (BYEs are unaffected)\n"
         "-y discard games unless they are played in year_before or earlier\n"
         "+y discard games unless they are played in year_after or later\n"
         "-w specifies a whitelist list of tournaments, discard games not from one\n"
@@ -488,6 +494,7 @@ int main( int argc, const char *argv[] )
         pgn2line( fin, temp1_fout, diag_fout,
                     false,
                     reverse_flag,
+                    remove_zero_length_flag,
                     year_before,
                     year_after,
                     whitelist,
@@ -520,6 +527,7 @@ int main( int argc, const char *argv[] )
                 pgn2line( line, temp1_fout, diag_fout,
                             append,
 		                    reverse_flag,
+                            remove_zero_length_flag,
                             year_before,
                             year_after,
                             whitelist,
@@ -562,7 +570,7 @@ public:
     void clear();
     void process_header_line( const std::string &line );
     void process_moves_line( const std::string &line );
-    bool is_game_usable();
+    bool is_game_non_zero_length_or_BYE();
     std::string get_game_as_line(bool reverse_order);
     void fixup_tournament( const std::map<std::string,std::string> &fixup_list );
     void fixup_names( const std::map<std::string,std::string> &fixup_list, std::ofstream *p_out_diag );
@@ -750,7 +758,7 @@ std::string Game::get_description()
 {
     std::string s;
     s = white;
-    s += "-";
+    s += " - ";
     s += black;
     s += " - ";
     s += eventx;
@@ -765,13 +773,13 @@ std::string Game::get_description()
     return s;
 }
 
-bool Game::is_game_usable()
+bool Game::is_game_non_zero_length_or_BYE()
 {
     if( move_txt_len > static_cast<int>(result.length()) )
         return true;
     std::string w = util::toupper(white);
     std::string b = util::toupper(black);
-    return(w=="BYE" || b=="BYE");
+    return( w=="BYE" || b=="BYE" );
 }
 
 void Game::process_header_line( const std::string &line )
@@ -892,6 +900,7 @@ std::string Game::get_site_header()
 static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
                     bool append,
                     bool reverse_order,
+                    bool remove_zero_length,
                     int year_before,
                     int year_after,
                     const std::set<std::string> &whitelist,
@@ -1053,8 +1062,8 @@ static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
             {
                 state = (state==process_game_and_exit ? done : search_for_header);
                 bool ok = (game.yyyy>=year_after && game.yyyy<=year_before);
-                if( ok )
-                    ok = game.is_game_usable();
+                if( ok && remove_zero_length )
+                    ok = game.is_game_non_zero_length_or_BYE();
                 std::string t = game.get_yyyy_event_at_site();
                 if( ok && whitelist.size() > 0)
                 {
