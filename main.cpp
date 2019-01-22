@@ -27,6 +27,7 @@
 
      -l indicates input is a text file that lists input pgn files (else input is a pgn file)
      -z indicates don't include zero length games (BYEs are unaffected)
+     -d indicates smart game de-duplication (eliminates more dups)
      -y discard games unless they are played in year_before or earlier
      +y discard games unless they are played in year_after or later
      -w specifies a whitelist list of tournaments, discard games not from these tournaments
@@ -94,10 +95,6 @@
     as the first game date encountered for the tournament after the stage 1 sort, allowing
     us to replace the proxy start date with the real start date.
     
-    TODO - At the moment only exact duplicates are eliminated with an internal "uniq" step.
-    To eliminate more dups, consider eliminating games with identical prefixes but different
-    content. Usually the different content will be due to annotations, so keep longest content.
-
     TODO - Events and/or Sites with embedded @ characters are not accommodated by the
     whitelist, blacklist and fixuplist files, extend the tournament list syntax used by
     those files with an appropriate extension to allow that
@@ -281,6 +278,7 @@ int main( int argc, const char *argv[] )
     bool list_flag = false;
     bool reverse_flag = false;
     bool whitelist_flag = false;
+    bool smart_uniq = false;
     std::string whitelist_file;
     bool blacklist_flag = false;
     std::string blacklist_file;
@@ -293,9 +291,10 @@ int main( int argc, const char *argv[] )
     int year_after=-10000, year_before=10000;
 
 #if 0   // for debugging / testing
-    list_flag=true;
-    std::string fin("pgnlist-medium.txt");
-    std::string fout("ref8.lpgn");
+    //list_flag=true;
+    smart_uniq = true;
+    std::string fin("welly4.pgn");
+    std::string fout("welly5.lpgn");
 #else
 
     int arg_idx=1;
@@ -307,6 +306,8 @@ int main( int argc, const char *argv[] )
             reverse_flag = true;
         else if( std::string(argv[arg_idx]) == "-z" )
             remove_zero_length_flag = true;
+        else if( std::string(argv[arg_idx]) == "-d" )
+            smart_uniq = true;
         else if( util::prefix( std::string(argv[arg_idx]),"-f") )
         {
             fixup_flag = true;
@@ -398,6 +399,7 @@ int main( int argc, const char *argv[] )
         "-l indicates input is a text file that lists input pgn files\n"
         "   (otherwise input is a single pgn file)\n"
         "-z indicates don't include zero length games (BYEs are unaffected)\n"
+        "-d indicates smart game de-duplication (eliminates more dups)\n"
         "-y discard games unless they are played in year_before or earlier\n"
         "+y discard games unless they are played in year_after or later\n"
         "-w specifies a whitelist list of tournaments, discard games not from one\n"
@@ -474,7 +476,7 @@ int main( int argc, const char *argv[] )
         {
             if( names.size() > 0 )
             {
-                diag_fout = fout + "-diag-name-fixups.txt";
+                diag_fout = fout + "-name-fixups.txt";
                 printf( "All player name fixups will be listed in file %s\n", diag_fout.c_str() );
             }
             for( unsigned int i=0; ok && i<names.size(); i+=2 )
@@ -538,8 +540,22 @@ int main( int argc, const char *argv[] )
             append = true;
         }
     }
-    printf( "%sStarting sort\n", list_flag?"\n":"" );   // list_flag = newline needed
-    disksort( temp1_fout, temp2_fout );
+    std::ofstream out_smart_uniq;
+    std::string smart_uniq_msg;
+    if( smart_uniq )
+    {
+        std::string dedup_fout = "dedup-" + fout;
+        smart_uniq_msg = util::sprintf( ", use file %s to review smart de-duplication decisions", dedup_fout.c_str() );
+        out_smart_uniq.open( dedup_fout.c_str() );
+        if( !out_smart_uniq )
+        {
+            printf( "Warning; Cannot open smart deduplication file %s for writing, so smart dedup disabled\n", dedup_fout.c_str() );
+            smart_uniq = "";
+        }
+    }
+    std::ofstream *p_smart_uniq = out_smart_uniq ? &out_smart_uniq : 0;
+    printf( "%sStarting sort%s\n", list_flag?"\n":"", smart_uniq_msg.c_str() );   // list_flag = newline needed
+    disksort( temp1_fout, temp2_fout, p_smart_uniq );
     printf( "Sort complete\n");
     remove( temp1_fout.c_str() );
     printf( "Starting refinement sort\n");
@@ -549,7 +565,7 @@ int main( int argc, const char *argv[] )
 		printf( "Refinement sort complete\n");
 		remove( temp2_fout.c_str() );
 		printf( "Starting reversal sort\n");
-		disksort( temp1_fout, fout, true, false );
+		disksort( temp1_fout, fout, 0, true, false );
 		printf( "Reversal sort complete\n");
 		remove( temp1_fout.c_str() );
 	}

@@ -24,7 +24,7 @@
 #include "util.h"
 #include "disksort.h"
 
-bool disksort( std::string fin, std::string fout, bool reverse, bool uniq )
+bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, bool reverse, bool uniq )
 {
     std::ifstream in(fin.c_str());
     if( !in )
@@ -57,8 +57,9 @@ bool disksort( std::string fin, std::string fout, bool reverse, bool uniq )
     empty_out.close();
 
     // While there's more to read
-    bool first=true;                // suppress uniq check first time through
-    std::string previous_line;      // previous line for uniq check
+    bool first=true;                    // suppress uniq check first time through
+    std::string previous_line;          // previous line for uniq check
+    std::vector<std::string> lookback;  // previous lines for smart lookback
     while( in )
     {
 
@@ -128,8 +129,83 @@ bool disksort( std::string fin, std::string fout, bool reverse, bool uniq )
                 file_line_available = static_cast<bool>(std::getline(temp_in,file_line));
             }
 
-            // Built in uniq feature optionally drops duplicate lines, never drop first line
-            if( first || !uniq || output_line!=previous_line )
+            // Smart deduplication ?
+            if( p_smart_uniq )
+            {
+                bool run_broken = false;
+                if( lookback.size() > 0 )
+                {
+                    run_broken = true;
+                    size_t offset1 =  lookback[lookback.size()-1].find("@H");
+                    size_t offset2 =  output_line.find("@H");
+                    if( offset1!=std::string::npos && offset2!=std::string::npos && offset1==offset2)
+                    {
+                        std::string  prefix1 = lookback[lookback.size()-1].substr(0,offset1);
+                        std::string  prefix2 = output_line.substr(0,offset2);
+                        run_broken = (prefix1 != prefix2);
+                    }
+                }
+
+                // If run not broken, add output to lookback buffer before possible resolution
+                if( !run_broken )
+                    lookback.push_back(output_line);
+
+                // Resolve lookback buffer if no more input, or if run of matching games broken
+                bool more = (in || file_line_available || memory_line_available);
+                if( lookback.size()>0 && (!more||run_broken)  )
+                {
+                    size_t max=0;
+                    size_t the_one=0;
+                    bool all_the_same=true;
+                    std::string s = lookback[0];
+                    for( size_t i=0; i<lookback.size(); i++ )
+                    {
+                        if( i>0 && s != lookback[i] )
+                            all_the_same = false;
+                        if( lookback[i].length() >= max )
+                        {
+                            max = lookback[i].length();
+                            the_one = i;   
+                        }
+                    }
+
+                    // Choose the longest of the matching games
+                    util::putline(temp_out,lookback[the_one]);
+
+                    // If they weren't all the same, append to diagnostics file to show what we did
+                    s = "";
+                    for( size_t i=0; !all_the_same && i<lookback.size(); i++ )
+                    {
+                        std::string t = lookback[i];
+                        if( i == the_one )
+                        {
+                            util::replace_once(t,"[White \"","[White \"KEEP ");
+                            util::putline(*p_smart_uniq,t);
+                        }
+                        else if( t != s )
+                        {
+                            s = t;   // Don't show identical discards
+                            util::replace_once(t,"[White \"","[White \"DISCARD ");
+                            util::putline(*p_smart_uniq,t);
+                        }
+                    }
+
+                    // Lookback buffer is resolved
+                    lookback.clear();
+                }
+
+                // If run was broken, we haven't processed the output line
+                if( run_broken )
+                {
+                    if( more )  // so either buffer it or write it out immediately
+                        lookback.push_back(output_line);
+                    else
+                        util::putline(temp_out,output_line);
+                }
+            }
+
+            // Else simple uniq feature optionally drops duplicate lines, never drop first line
+            else if( first || !uniq || output_line!=previous_line )
             {
                 util::putline(temp_out,output_line);
                 previous_line = output_line;
