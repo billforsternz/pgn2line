@@ -151,7 +151,7 @@ bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, 
                     lookback.push_back(output_line);
 
                 // Resolve lookback buffer if no more input, or if run of matching games broken
-                bool more = (in || file_line_available || memory_line_available);
+                bool more = (file_line_available || memory_line_available || in);
                 if( lookback.size()>0 && (!more||run_broken)  )
                 {
                     size_t max=0;
