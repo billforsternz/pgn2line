@@ -393,7 +393,8 @@ int main( int argc, const char *argv[] )
         "Convert pgn file(s) to an intermediate format, one line per game, sorted\n"
         "\n"
         "Usage:\n"
-        " pgn2line [-l] [-y year_before] [+y year_after] [-w whitelist | -b blacklist]\n"
+        " pgn2line [-l] [-z] [-d] [-y year_before] [+y year_after]\n"
+        "          [-w whitelist | -b blacklist]\n"
         "          [-f fixuplist] [-r] input output.lpgn\n"
         "\n"
         "-l indicates input is a text file that lists input pgn files\n"
@@ -424,7 +425,7 @@ int main( int argc, const char *argv[] )
         "Output is all games found in one game per line format, sorted. The .lpgn\n"
         "extension shown is just a suggested convention\n"
         "\n"
-        "See also companion programs line2pgn and tournaments\n"
+        "See also companion programs line2pgn, wordsearch, tournaments and players\n"
         );
         return -1;
     }
