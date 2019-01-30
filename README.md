@@ -92,10 +92,14 @@ games, with no immediate way of accessing the containing game.
 Usage:
 
 <pre>
-pgn2line [-l] [-y year_before] [+y year_after] [-w whitelist | -b blacklist]
-		  [-f fixuplist]  input output
+ pgn2line [-l] [-z] [-d] [-y year_before] [+y year_after]
+          [-w whitelist | -b blacklist]
+          [-f fixuplist] [-r] input output.lpgn
 
--l indicates input is a text file that lists input pgn files (else input is a pgn file)
+-l indicates input is a text file that lists input pgn files
+   (otherwise input is a single pgn file)
+-z indicates don't include zero length games (BYEs are unaffected)
+-d indicates smart game de-duplication (eliminates more dups)
 -y discard games unless they are played in year_before or earlier
 +y discard games unless they are played in year_after or later
 -w specifies a whitelist list of tournaments, discard games not from these tournaments
@@ -122,6 +126,9 @@ For example
 
 This will apply the simple transformation Event->"23rd German Open" and Site->"Berlin, Germany"
 For the moment Events and/or Sites with embedded @ characters are not accommodated.
+
+Pairs of before and after player names are now allowed in the fixup file,
+player names are identified as those strings NOT in yyyy Event@Site format.
 
 The program suite also includes *line2pgn*, a program to convert back to pgn, and *tournaments*,
 a program to convert the line format into a tournament list. This list can be
@@ -160,9 +167,14 @@ the same Event and Site in any 6 month window. The tournament date is easily det
 as the first game date encountered for the tournament after the stage 1 sort, allowing
 us to replace the proxy start date with the real start date.
 
-TODO - At the moment only exact duplicates are eliminated with an internal "uniq" step.
+Formerly TODO now DONE (see -d flag) - At the moment only exact duplicates are eliminated with an internal "uniq" step.
 To eliminate more dups, consider eliminating games with identical prefixes but different
 content. Usually the different content will be due to annotations, so keep longest content.
+
+Formerly TODO now DONE - A simple and useful enhancement would be to allow player name pairs in the
+fixuplist.  Any line that didn't match the yyyy event@site syntax would be considered
+a player name. Then the before and after player name pairs would be checked and
+possibly applied for every "White" and "Black" name in the file
 
 TODO - Events and/or Sites with embedded @ characters are not accommodated by the
 whitelist, blacklist and fixuplist files, extend the tournament list syntax used by
@@ -173,7 +185,3 @@ those files with an appropriate extension to allow that. One idea to allow this 
 The concept here is that if the first charracter is a '@' then the 2nd character
 replaces @ as the Event/Site separator.
 
-TODO - A simple and useful enhancement would be to allow player name pairs in the
-fixuplist.  Any line that didn't match the yyyy event@site syntax would be considered
-a player name. Then the before and after player name pairs would be checked and
-possibly applied for every "White" and "Black" name in the file
