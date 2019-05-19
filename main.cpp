@@ -116,6 +116,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <assert.h>
 #include <iostream>
 #include <fstream>
@@ -142,7 +143,8 @@ static void line2pgn( std::string fin, std::string fout );
 static void tournaments( std::string fin, std::string fout, bool bare=false );
 static void players( std::string fin, std::string fout, bool bare, bool dups_only );
 static bool read_tournament_list( std::string fin, std::vector<std::string> &tournaments, std::vector<std::string> *names=NULL  );
-static bool test_date_format( const std::string &date,char separator );
+static bool test_date_format( const std::string &date, char separator );
+static bool parse_date_format( const std::string &date, char separator, int &yyyy, int &mm, int &dd );
 static bool refine_sort( std::string fin, std::string fout );
 static void word_search( bool case_insignificant, std::string word, std::string fin, std::string fout );
 
@@ -292,9 +294,9 @@ int main( int argc, const char *argv[] )
 
 #if 0   // for debugging / testing
     //list_flag=true;
-    smart_uniq = true;
-    std::string fin("welly4.pgn");
-    std::string fout("welly5.lpgn");
+    //smart_uniq = true;
+    std::string fin("minibug.pgn");
+    std::string fout("minibug.lpgn");
 #else
 
     int arg_idx=1;
@@ -486,6 +488,8 @@ int main( int argc, const char *argv[] )
     }
     if( !ok )
         return -1;
+    unsigned int seed = static_cast<unsigned int>( time(NULL) );
+    srand(seed);
     int r1=rand();
     int r2=rand();
     while( r1 == r2 )
@@ -858,20 +862,18 @@ void Game::process_header_line( const std::string &line )
             {
                 bool ok=false;
                 date = value;
-
-                // Get year in cases like 1851.??.??, even though whole date not available/valid
-                if( date.length() >= 4 )
-                {
-                    year = date.substr(0,4);
-                    yyyy = atoi(year.c_str());
-                    if( yyyy<=0 )
-                        year = "0000";
-                }
-                ok = test_date_format( date, '.' );
+                int y,m,d;
+                ok = parse_date_format( date, '.', y, m, d );
                 if( ok )
                 {
-                    month = date.substr(5,2);
-                    day   = date.substr(8,2);
+                    char buf[20];
+                    yyyy = y;
+                    sprintf( buf, "%04d", y );
+                    year  = std::string(buf);
+                    sprintf( buf, "%02d", m );
+                    month = std::string(buf);
+                    sprintf( buf, "%02d", d );
+                    day   = std::string(buf);
                 }
             }
             else if( key == "Round" )
@@ -1824,19 +1826,8 @@ static bool refine_sort( std::string fin, std::string fout )
                 //  First date is tournament start date, second date is game date.
                 const size_t event_offset=11;
                 bool ok = line.length()>event_offset && line[event_offset-1]==' ';
-                if( ok && test_date_format(line,'-') )
-                {
-                    std::string year = line.substr(0,4);
-                    yyyy = atoi(year.c_str());
-                    ok = yyyy>=1000;
-                    if( ok )
-                    {
-                        std::string month = line.substr(5,2);
-                        mm = atoi(month.c_str());
-                        ok = (1<=mm && mm<=12);
-                    }
-                }
-                if( ok )
+                int dd;
+                if( ok && parse_date_format(line,'-',yyyy,mm,dd) )
                 {
                     ok = false;
                     size_t offset = line.find(" # ");
@@ -1844,10 +1835,11 @@ static bool refine_sort( std::string fin, std::string fout )
                     {
                         tournament_description = line.substr(event_offset, offset-event_offset);
                         offset += 3;
-                        if( test_date_format(line.substr(offset),'-') )
+                        int y,m,d;
+                        if( parse_date_format(line.substr(offset),'-',y,m,d) )
                         {
                             ok = true;
-                            game_date = line.substr(offset,10);
+                            game_date = util::sprintf( "%04d-%02d-%02d",y,m,d);
                         }
                     }
                 }
@@ -1940,7 +1932,7 @@ static bool read_tournament_list( std::string fin, std::vector<std::string> &tou
 }
 
 
-static bool test_date_format( const std::string &date,char separator )
+static bool test_date_format( const std::string &date, char separator )
 {
     // Test only that for yyyy.mm.dd, each of yyyy, mm, and dd are present
     //  and numeric
@@ -1954,7 +1946,42 @@ static bool test_date_format( const std::string &date,char separator )
             case 1: s = date.substr(5,2);   break;
             case 2: s = date.substr(8,2);   break;
         }
-        ok = (s.find_first_not_of("0123456789") == std::string::npos);
+        ok = (s.find_first_not_of("0123456789?") == std::string::npos);
+    }
+    return ok;
+}
+
+// Don't just test that yyyy.mm.dd are present and numeric - get the numeric values and change
+//  mm=0, dd=0 to mm=1, dd=1 - Helps refinement sort not fall off a cliff between December and
+// January in cases where there are games with unknown month/day between them
+static bool parse_date_format( const std::string &date, char separator, int &yyyy, int &mm, int &dd )
+{
+    // Test that for yyyy.mm.dd, each of yyyy, mm, and dd are present
+    //  and numeric
+    bool ok = date.length()>=10 && date[4]==separator && date[7]==separator;
+    for( int i=0; ok && i<3; i++ )
+    {
+        std::string s;
+        switch(i)
+        {
+            case 0: s = date.substr(0,4);
+                    yyyy = atoi(s.c_str());
+                    break;
+            case 1: s = date.substr(5,2);
+                    mm = atoi(s.c_str());
+                    break;
+            case 2: s = date.substr(8,2);
+                    dd = atoi(s.c_str());
+                    break;
+        }
+        ok = (s.find_first_not_of("0123456789?") == std::string::npos);
+    }
+    if( ok )
+    {
+        if( mm == 0 )
+            mm = 1;
+        if( dd == 0 )
+            dd = 1;
     }
     return ok;
 }
