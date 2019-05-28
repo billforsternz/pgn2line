@@ -24,6 +24,96 @@
 #include "util.h"
 #include "disksort.h"
 
+// We do a bit of LPGN format specific stuff (LPGN = output of pgn2line)
+static size_t find_sort_tie_breaker_in_prefix( const std::string &prefix )
+{
+	// Prefix format is now;
+	//  "1984-02-01 Reykjavik Open, Reykjavik # 1984-02-01 01 012345678 Chandler-Taylor"
+	//  9 digit number (012345678 here) is the sorting tie breaker offset, it's the
+	//  game index, so if everything else matches, try to keep the order from the
+	//  original PGNs
+	size_t tie_breaker_offset = std::string::npos;
+	size_t offset = prefix.find_last_of(' ');
+	if( offset != std::string::npos )
+	{
+		if( offset > 10 )
+		{
+			size_t base = offset-9;
+			if( prefix[base-1] == ' ' )
+			{
+				std::string tie_breaker = prefix.substr(base,9);
+				bool only_digits = (std::string::npos == tie_breaker.find_first_not_of("0123456789"));
+				if( only_digits )
+					tie_breaker_offset = base;
+			}
+		}
+	}
+	return tie_breaker_offset;
+}
+
+//static std::ofstream debug("debug.txt");
+
+// Compare two strings for equality, if they are in LPGN format, sort tie-breaker fields
+//  do not have to match for equality
+static bool equal_whole_line( const std::string &s1, const std::string &s2 )
+{
+	// Fallback
+	bool eq = (s1 == s2);
+
+	// Check for LPGN format
+	size_t offset1 = s1.find("@H");
+	size_t offset2 = s2.find("@H");
+	if( !eq && offset1 != std::string::npos && offset2 != std::string::npos && offset1==offset2 )
+	{
+
+		// LPGN might still match,
+        //  Do suffixes match? (suffix = rest of string after prefix)
+		if( s1.substr(offset1) == s2.substr(offset2) )
+		{
+
+			// Suffixes match, test if prefixes match
+			std::string  prefix1 = s1.substr(0, offset1);
+			std::string  prefix2 = s2.substr(0, offset2);
+			size_t idx = find_sort_tie_breaker_in_prefix( prefix1 );
+			if( idx != std::string::npos )
+				for( int i=0; i<9; i++ )
+					prefix1[idx++] = '#';	// fast way of making tie breakers (in throwaway strings) equal
+			idx = find_sort_tie_breaker_in_prefix( prefix2 );
+			if( idx != std::string::npos )
+				for( int i=0; i<9; i++ )
+					prefix2[idx++] = '#';
+			eq = (prefix1 == prefix2);
+		}
+	}
+    //util::putline( debug, util::sprintf( "equal_whole_line(\n%s,\n%s )\n returns %s\n", s1.c_str(), s2.c_str(), eq?"true":"false" ) );
+	return eq;
+}
+
+// Compare two LPGN prefixes for equality, sort tie-breaker fields
+//  do not have to match for equality
+static bool equal_prefix_only(const std::string &s1, const std::string &s2)
+{
+	bool eq = false;
+	size_t offset1 = s1.find("@H");
+	size_t offset2 = s2.find("@H");
+	if( offset1 != std::string::npos && offset2 != std::string::npos && offset1==offset2 )
+	{
+		std::string  prefix1 = s1.substr(0, offset1);
+		std::string  prefix2 = s2.substr(0, offset2);
+		size_t idx = find_sort_tie_breaker_in_prefix( prefix1 );
+		if( idx != std::string::npos )
+			for( int i=0; i<9; i++ )
+				prefix1[idx++] = '#';	// fast way of making tie breakers (in throwaway strings) equal
+		idx = find_sort_tie_breaker_in_prefix( prefix2 );
+		if( idx != std::string::npos )
+			for( int i=0; i<9; i++ )
+				prefix2[idx++] = '#';
+		eq = (prefix1 == prefix2);
+	}
+    //util::putline( debug, util::sprintf( "equal_prefix_only(\n%s,\n%s )\n returns %s\n", s1.c_str(), s2.c_str(), eq?"true":"false" ) ); 
+	return eq;
+}
+
 bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, bool reverse, bool uniq )
 {
     std::ifstream in(fin.c_str());
@@ -134,17 +224,7 @@ bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, 
             {
                 bool run_broken = false;
                 if( lookback.size() > 0 )
-                {
-                    run_broken = true;
-                    size_t offset1 =  lookback[lookback.size()-1].find("@H");
-                    size_t offset2 =  output_line.find("@H");
-                    if( offset1!=std::string::npos && offset2!=std::string::npos && offset1==offset2)
-                    {
-                        std::string  prefix1 = lookback[lookback.size()-1].substr(0,offset1);
-                        std::string  prefix2 = output_line.substr(0,offset2);
-                        run_broken = (prefix1 != prefix2);
-                    }
-                }
+					run_broken = !equal_prefix_only( lookback[lookback.size()-1], output_line );
 
                 // If run not broken, add output to lookback buffer before possible resolution
                 if( !run_broken )
@@ -160,7 +240,7 @@ bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, 
                     std::string s = lookback[0];
                     for( size_t i=0; i<lookback.size(); i++ )
                     {
-                        if( i>0 && s != lookback[i] )
+                        if( i>0 && !equal_whole_line(s,lookback[i]) )
                             all_the_same = false;
                         if( lookback[i].length() >= max )
                         {
@@ -182,7 +262,7 @@ bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, 
                             util::replace_once(t,"[White \"","[White \"KEEP ");
                             util::putline(*p_smart_uniq,t);
                         }
-                        else if( t != s )
+                        else if( !equal_whole_line(t,s) )
                         {
                             s = t;   // Don't show identical discards
                             util::replace_once(t,"[White \"","[White \"DISCARD ");
@@ -205,7 +285,7 @@ bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, 
             }
 
             // Else simple uniq feature optionally drops duplicate lines, never drop first line
-            else if( first || !uniq || output_line!=previous_line )
+            else if( first || !uniq || !equal_whole_line(output_line,previous_line) )
             {
                 util::putline(temp_out,output_line);
                 previous_line = output_line;
