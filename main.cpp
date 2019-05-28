@@ -22,24 +22,26 @@
     games ready for immediate conversion back into PGN.
 
     Usage:
-     pgn2line [-l] [-y year_before] [+y year_after] [-w whitelist | -b blacklist]
+     pgn2line [-l] [-z] [-d] [-r] [-p]
+              [-y year_before] [+y year_after] [-w whitelist | -b blacklist]
               [-f fixuplist]  input output
 
      -l indicates input is a text file that lists input pgn files (else input is a pgn file)
      -z indicates don't include zero length games (BYEs are unaffected)
      -d indicates smart game de-duplication (eliminates more dups)
+	 -r specifies smart reverse sort - yields most recent games first, smart because higher
+        rounds/boards are adjusted to come first both here and in the conventional sort
+        order
+     -p indicates create a .pgn from output (filename is ".pgn" appended to output)
      -y discard games unless they are played in year_before or earlier
      +y discard games unless they are played in year_after or later
      -w specifies a whitelist list of tournaments, discard games not from these tournaments
      -b specifies a blacklist list of tournaments, discard games from these tournaments
      -f specifies a list of tournament name fixups
-	 -r specifies smart reverse sort - yields most recent games first, smart because higher
-        rounds/boards are adjusted to come first both here and in the conventional sort
-        order
 
     Output is all games found in one game per line format, sorted for maxium utility.
 
-    Program line2pgn converts back to PGN format.
+    Program line2pgn (or option -p) converts back to PGN format.
 
     Whitelist, blacklist and fixuplist are all text files listing tournaments in the 
     following format;
@@ -76,11 +78,16 @@
      1) readable summary of the game
      2) allows simple string sort to order games effectively
 
-    Example for Smith v Jones, Event=Acme Open, Site=Gotham, round 3.2 on 2001-12-31 prefix is;
-      2001-12-28 Acme Open, Gotham # 2001-12-31 03.002 Smith-Jones
+    Example for Smith v Jones, Event=Acme Open, Site=Gotham, round 3.2.1 on 2001-12-31 prefix is;
+      2001-12-28 Acme Open, Gotham # 2001-12-31 003.002.001 000000001 Smith-Jones
 
     The first date is the tournament date (first day in tournament), the second date is the
     game date.
+
+    Note: I have added a 9 digit tie breaker after the round information. It's a game idx,
+    1 for first game read, 2 for second etc. and serves to order the games in the original
+    source order if everything else matches. The first release of this suite lacked this
+    feature.
 
     The net result is that all games in the tournament are grouped together in date/round
     order. Tournaments are sorted by start date of tournament. This can reasonably be
@@ -129,7 +136,7 @@
 #include "disksort.h"
 #include "util.h"
 
-static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
+static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
                         bool append,
                         bool reverse_order,
                         bool remove_zero_length,
@@ -279,6 +286,7 @@ int main( int argc, const char *argv[] )
     bool remove_zero_length_flag = false;
     bool list_flag = false;
     bool reverse_flag = false;
+    bool pgn_create_flag = false;
     bool whitelist_flag = false;
     bool smart_uniq = false;
     std::string whitelist_file;
@@ -295,8 +303,8 @@ int main( int argc, const char *argv[] )
 #if 0   // for debugging / testing
     //list_flag=true;
     //smart_uniq = true;
-    std::string fin("minibug.pgn");
-    std::string fout("minibug.lpgn");
+    std::string fin("mm.pgn");
+    std::string fout("mm.lpgn");
 #else
 
     int arg_idx=1;
@@ -310,6 +318,8 @@ int main( int argc, const char *argv[] )
             remove_zero_length_flag = true;
         else if( std::string(argv[arg_idx]) == "-d" )
             smart_uniq = true;
+        else if( std::string(argv[arg_idx]) == "-p" )
+            pgn_create_flag = true;
         else if( util::prefix( std::string(argv[arg_idx]),"-f") )
         {
             fixup_flag = true;
@@ -391,18 +401,43 @@ int main( int argc, const char *argv[] )
         ok = false;
     if( !ok || (whitelist_flag&&blacklist_flag) )
     {
+/*
+     pgn2line [-l] [-z] [-d] [-r] [-p]
+              [-y year_before] [+y year_after] [-w whitelist | -b blacklist]
+              [-f fixuplist]  input output
+
+     -l indicates input is a text file that lists input pgn files (else input is a pgn file)
+     -z indicates don't include zero length games (BYEs are unaffected)
+     -d indicates smart game de-duplication (eliminates more dups)
+	 -r specifies smart reverse sort - yields most recent games first, smart because higher
+        rounds/boards are adjusted to come first both here and in the conventional sort
+        order
+     -p indicates create a .pgn from output (filename is ".pgn" appended to output)
+     -y discard games unless they are played in year_before or earlier
+     +y discard games unless they are played in year_after or later
+     -w specifies a whitelist list of tournaments, discard games not from these tournaments
+     -b specifies a blacklist list of tournaments, discard games from these tournaments
+     -f specifies a list of tournament name fixups
+
+*/
+
         printf(
         "Convert pgn file(s) to an intermediate format, one line per game, sorted\n"
         "\n"
         "Usage:\n"
-        " pgn2line [-l] [-z] [-d] [-y year_before] [+y year_after]\n"
+        " pgn2line [-l] [-z] [-d] [-r] [-p] [-y year_before] [+y year_after]\n"
         "          [-w whitelist | -b blacklist]\n"
-        "          [-f fixuplist] [-r] input output.lpgn\n"
+        "          [-f fixuplist] input output.lpgn\n"
         "\n"
         "-l indicates input is a text file that lists input pgn files\n"
         "   (otherwise input is a single pgn file)\n"
         "-z indicates don't include zero length games (BYEs are unaffected)\n"
         "-d indicates smart game de-duplication (eliminates more dups)\n"
+		"-r specifies smart reverse sort - yields most recent games first, smart\n"
+		"   because higher rounds/boards are adjusted to come first both here and\n"
+		"   in the conventional sort order\n"
+        "-p indicates create a .pgn from output (filename is \".pgn\" appended to\n"
+        "   output)\n"
         "-y discard games unless they are played in year_before or earlier\n"
         "+y discard games unless they are played in year_after or later\n"
         "-w specifies a whitelist list of tournaments, discard games not from one\n"
@@ -410,9 +445,6 @@ int main( int argc, const char *argv[] )
         "-b specifies a blacklist list of tournaments, discard games from any of\n"
         "   these tournaments\n"
         "-f specifies a list of tournament name fixups\n"
-		"-r specifies smart reverse sort - yields most recent games first, smart\n"
-		"   because higher rounds/boards are adjusted to come first both here and\n"
-		"   in the conventional sort order\n"
         "\n"
         "-w -b and -f files are all lists of tournaments in the following format\n"
         "\n"
@@ -496,9 +528,10 @@ int main( int argc, const char *argv[] )
         r2=rand();
     std::string temp1_fout = util::sprintf( "%s-temp-filename-pgn2line-presort-%05d.tmp", fout.c_str(), r1 );
     std::string temp2_fout = util::sprintf( "%s-temp-filename-pgn2line-postsort-%05d.tmp", fout.c_str(), r2 );
+    ok = false;
     if( !list_flag )
     {
-        pgn2line( fin, temp1_fout, diag_fout,
+        ok = pgn2line( fin, temp1_fout, diag_fout,
                     false,
                     reverse_flag,
                     remove_zero_length_flag,
@@ -520,6 +553,7 @@ int main( int argc, const char *argv[] )
         }
         bool append=false;
         int file_number=0;
+        ok = false;
         for(;;)
         {
             std::string line;
@@ -531,7 +565,7 @@ int main( int argc, const char *argv[] )
             {
                 file_number++;
                 printf( "Processed %d files\r", file_number );
-                pgn2line( line, temp1_fout, diag_fout,
+                bool any = pgn2line( line, temp1_fout, diag_fout,
                             append,
 		                    reverse_flag,
                             remove_zero_length_flag,
@@ -541,10 +575,14 @@ int main( int argc, const char *argv[] )
                             blacklist,
                             fixups,
                             name_fixups );
+                if( any )  // don't give up unless none of the files are processed
+                    ok = true;
             }
             append = true;
         }
     }
+    if( !ok )
+        return -1;
     std::ofstream out_smart_uniq;
     std::string smart_uniq_msg;
     if( smart_uniq )
@@ -555,14 +593,14 @@ int main( int argc, const char *argv[] )
         if( !out_smart_uniq )
         {
             printf( "Warning; Cannot open smart deduplication file %s for writing, so smart dedup disabled\n", dedup_fout.c_str() );
-            smart_uniq = "";
+            smart_uniq_msg = "";
         }
     }
-    std::ofstream *p_smart_uniq = out_smart_uniq ? &out_smart_uniq : 0;
+    std::ofstream *p_smart_uniq = (smart_uniq && out_smart_uniq) ? &out_smart_uniq : 0;
     printf( "%sStarting sort%s\n", list_flag?"\n":"", smart_uniq_msg.c_str() );   // list_flag = newline needed
     disksort( temp1_fout, temp2_fout, p_smart_uniq );
+	remove( temp1_fout.c_str() );
     printf( "Sort complete\n");
-    remove( temp1_fout.c_str() );
     printf( "Starting refinement sort\n");
 	if( reverse_flag )
 	{
@@ -580,6 +618,8 @@ int main( int argc, const char *argv[] )
 		printf( "Refinement sort complete\n");
 		remove( temp2_fout.c_str() );
 	}
+    if( pgn_create_flag )
+        line2pgn( fout, fout + ".pgn" );
     return 0;
 #endif
 }
@@ -587,6 +627,7 @@ int main( int argc, const char *argv[] )
 class Game
 {
 public:
+	static unsigned int game_count;
     Game() {clear();}
     void clear();
     void process_header_line( const std::string &line );
@@ -615,7 +656,10 @@ private:
     std::string round;
     std::string result;
     int move_txt_len;
+	unsigned int game_idx;
 };
+
+unsigned int Game::game_count = 0;
 
 void Game::clear()
 {
@@ -633,6 +677,7 @@ void Game::clear()
     round.clear();
     result.clear();
     move_txt_len = 0;
+	game_idx = 0;
 }
 
 std::string Game::get_game_as_line(bool reverse_order)
@@ -732,46 +777,59 @@ std::string Game::get_prefix(bool reverse_order)
     s += day;
     s += ' ';
 
-	// eg Round = "3" -> "03" or if reverse order "97"
-	// eg Round = "3.1" -> "03.001" or if reverse order "97.999"
+	// eg Round = "3" -> "003" or if reverse order "997"
+	// eg Round = "3.1" -> "003.001" or if reverse order "997.999"
+	// eg Round = "3.1.2" -> "003.001.002" or if reverse order "997.999.998"
 	// The point is to make the text as usefully sortable as possible
-    int offset = round.find_first_of('.');
-    if( offset == std::string::npos )
+    std::string sround = round;
+    size_t offset = sround.find_first_of('.');
+    while( offset != std::string::npos )
     {
-		int iround = atoi(round.c_str());
+		std::string temp = sround.substr(0,offset);
+		int iround = atoi(temp.c_str());
 		if( reverse_order )
-			iround = 100-iround;
-		std::string temp = util::sprintf("%02d",iround);
-		s += temp;
-    }
-    else
-    {
-		std::string temp = round.substr(0,offset);
-		int iround1 = atoi(temp.c_str());
-		if( reverse_order )
-			iround1 = 100-iround1;
-		temp = util::sprintf("%02d",iround1);
+			iround = 1000-iround;
+		temp = util::sprintf("%03d",iround);
 		s += temp;
 		s += '.';
-		temp = round.substr(offset+1);
-		int iround2 = atoi(temp.c_str());
-		if( reverse_order )
-			iround2 = 1000-iround2;
-		temp = util::sprintf("%03d",iround2);
-		s += temp;
+		sround = sround.substr(offset+1);
+        offset = sround.find_first_of('.');
     }
-    s += ' ';
+	int iround = atoi(sround.c_str());
+	if( reverse_order )
+		iround = 1000-iround;
+	std::string temp = util::sprintf("%03d",iround);
+	s += temp;
+
+	// New feature, append the game idx in original file as a sort tie breaker,
+	//  in case round doesn't have a board number. Eg in a tournament you might
+	//  have Round 3.1, 3.2, 3.3 etc (great). But if you just have Round 3 for
+	//  all these games, without this tie breaker the games end up sorted
+	//  according to White's Surname (not very helpful). The tie breaker means
+	//  that the sort order will be the same as in the original .pgn, which is
+	//  likely to be an improvement over White's surname.
+	s += ' ';
+	std::string sgame_idx = util::sprintf("%09u", game_idx);
+	s += sgame_idx;
+
+	// Add " White-Black"
+	s += ' ';
     offset = white.find_first_of(",");
+    std::string one_word;
     if( offset != std::string::npos )
-        s += white.substr(0,offset);
+        one_word = white.substr(0,offset);
     else
-        s += white;
+        one_word = white;
+    util::replace_all( one_word, " ", "_" );
+    s += one_word;
     s += "-";
     offset = black.find_first_of(",");
     if( offset != std::string::npos )
-        s += black.substr(0,offset);
+        one_word = black.substr(0,offset);
     else
-        s += black;
+        one_word = black;
+    util::replace_all( one_word, " ", "_" );
+    s += one_word;
     return s;
 }
 
@@ -805,6 +863,8 @@ bool Game::is_game_non_zero_length_or_BYE()
 
 void Game::process_header_line( const std::string &line )
 {
+	if (game_idx == 0)
+		game_idx = ++game_count;
     bool event_site=false;
     bool white_black=false;
     std::string key, value;
@@ -866,14 +926,10 @@ void Game::process_header_line( const std::string &line )
                 ok = parse_date_format( date, '.', y, m, d );
                 if( ok )
                 {
-                    char buf[20];
                     yyyy = y;
-                    sprintf( buf, "%04d", y );
-                    year  = std::string(buf);
-                    sprintf( buf, "%02d", m );
-                    month = std::string(buf);
-                    sprintf( buf, "%02d", d );
-                    day   = std::string(buf);
+					year = util::sprintf( "%04d", y );
+					month = util::sprintf( "%02d", m );
+					day = util::sprintf( "%02d", d );
                 }
             }
             else if( key == "Round" )
@@ -916,7 +972,7 @@ std::string Game::get_site_header()
     return s;
 }
 
-static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
+static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
                     bool append,
                     bool reverse_order,
                     bool remove_zero_length,
@@ -932,13 +988,13 @@ static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
     if( !in )
     {
         printf( "Error; Cannot open file %s for reading\n", fin.c_str() );
-        return;
+        return false;
     }
     std::ofstream out( fout.c_str(), append ? std::ios_base::app : std::ios_base::out );
     if( !out )
     {
         printf( "Error; Cannot open file %s for %s\n", fout.c_str(), append?"appending":"writing" );
-        return;
+        return false;
     }
     std::ofstream out_diag;
     if( diag_fout != "" )
@@ -950,8 +1006,8 @@ static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
     std::ofstream *p_out_diag = out_diag ? &out_diag : NULL;
     int line_number=0;
     enum {search_for_header,start_header,in_header,process_header,
-          search_for_moves,in_moves,process_game,
-          process_game_and_exit,done} state=search_for_header;
+            search_for_moves,in_moves,process_game,
+            process_game_and_exit,done} state=search_for_header;
     std::string line;
     bool next_line=true;
     while( state != done )
@@ -1127,6 +1183,7 @@ static void pgn2line( std::string fin, std::string fout, std::string diag_fout,
             }
         }
     }
+    return true;
 }
 
 static void line2pgn( std::string fin, std::string fout )
