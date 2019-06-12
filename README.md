@@ -92,19 +92,23 @@ games, with no immediate way of accessing the containing game.
 Usage:
 
 <pre>
- pgn2line [-l] [-z] [-d] [-y year_before] [+y year_after]
-          [-w whitelist | -b blacklist]
-          [-f fixuplist] [-r] input output.lpgn
+Usage:
+ pgn2line [-l] [-z] [-d] [-r] [-p]
+          [-y year_before] [+y year_after] [-w whitelist | -b blacklist]
+          [-f fixuplist]  input output
 
--l indicates input is a text file that lists input pgn files
-   (otherwise input is a single pgn file)
--z indicates don't include zero length games (BYEs are unaffected)
--d indicates smart game de-duplication (eliminates more dups)
--y discard games unless they are played in year_before or earlier
-+y discard games unless they are played in year_after or later
--w specifies a whitelist list of tournaments, discard games not from these tournaments
--b specifies a blacklist list of tournaments, discard games from these tournaments
--f specifies a list of tournament name fixups
+ -l indicates input is a text file that lists input pgn files (else input is a pgn file)
+ -z indicates don't include zero length games (BYEs are unaffected)
+ -d indicates smart game de-duplication (eliminates more dups)
+ -r specifies smart reverse sort - yields most recent games first, smart because higher
+    rounds/boards are adjusted to come first both here and in the conventional sort
+    order
+ -p indicates create a .pgn from output (filename is ".pgn" appended to output)
+ -y discard games unless they are played in year_before or earlier
+ +y discard games unless they are played in year_after or later
+ -w specifies a whitelist list of tournaments, discard games not from these tournaments
+ -b specifies a blacklist list of tournaments, discard games from these tournaments
+ -f specifies a list of tournament name fixups
 </pre>
 
 Output is all games found in one game per line format, sorted for maxium utility.

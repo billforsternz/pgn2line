@@ -60,6 +60,9 @@
 
     This will apply the simple transformation Event->"23rd German Open" and Site->"Berlin, Germany"
     For the moment Events and/or Sites with embedded @ characters are not accommodated.
+    
+    Pairs of before and after player names are now allowed in the fixup file,
+    player names are identified as those strings NOT in yyyy Event@Site format.
  
     Also line2pgn, a program to convert back to pgn.
 
