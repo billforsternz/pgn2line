@@ -28,6 +28,7 @@
 
      -l indicates input is a text file that lists input pgn files (else input is a pgn file)
      -z indicates don't include zero length games (BYEs are unaffected)
+     -Z indicates don't include zero length games, including BYEs
      -d indicates smart game de-duplication (eliminates more dups)
 	 -r specifies smart reverse sort - yields most recent games first, smart because higher
         rounds/boards are adjusted to come first both here and in the conventional sort
@@ -143,6 +144,7 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
                         bool append,
                         bool reverse_order,
                         bool remove_zero_length,
+                        bool remove_zero_length_allow_bye,
                         int year_before,
                         int year_after,
                         const std::set<std::string> &whitelist,
@@ -286,7 +288,8 @@ int main( int argc, const char *argv[] )
 
 #ifdef PGN2LINE
     // Command line processing
-    bool remove_zero_length_flag = false;
+    bool remove_zero_length = false;
+    bool remove_zero_length_allow_bye = false;
     bool list_flag = false;
     bool reverse_flag = false;
     bool pgn_create_flag = false;
@@ -317,8 +320,10 @@ int main( int argc, const char *argv[] )
             list_flag = true;
         else if( std::string(argv[arg_idx]) == "-r" )
             reverse_flag = true;
+        else if( std::string(argv[arg_idx]) == "-Z" )
+            remove_zero_length = true;
         else if( std::string(argv[arg_idx]) == "-z" )
-            remove_zero_length_flag = true;
+            remove_zero_length_allow_bye = true;
         else if( std::string(argv[arg_idx]) == "-d" )
             smart_uniq = true;
         else if( std::string(argv[arg_idx]) == "-p" )
@@ -411,6 +416,7 @@ int main( int argc, const char *argv[] )
 
      -l indicates input is a text file that lists input pgn files (else input is a pgn file)
      -z indicates don't include zero length games (BYEs are unaffected)
+     -Z indicates don't include zero length games, including BYEs
      -d indicates smart game de-duplication (eliminates more dups)
 	 -r specifies smart reverse sort - yields most recent games first, smart because higher
         rounds/boards are adjusted to come first both here and in the conventional sort
@@ -435,6 +441,7 @@ int main( int argc, const char *argv[] )
         "-l indicates input is a text file that lists input pgn files\n"
         "   (otherwise input is a single pgn file)\n"
         "-z indicates don't include zero length games (BYEs are unaffected)\n"
+        "-Z indicates don't include zero length games, including BYEs\n"
         "-d indicates smart game de-duplication (eliminates more dups)\n"
 		"-r specifies smart reverse sort - yields most recent games first, smart\n"
 		"   because higher rounds/boards are adjusted to come first both here and\n"
@@ -537,7 +544,8 @@ int main( int argc, const char *argv[] )
         ok = pgn2line( fin, temp1_fout, diag_fout,
                     false,
                     reverse_flag,
-                    remove_zero_length_flag,
+                    remove_zero_length,
+                    remove_zero_length_allow_bye,
                     year_before,
                     year_after,
                     whitelist,
@@ -571,7 +579,8 @@ int main( int argc, const char *argv[] )
                 bool any = pgn2line( line, temp1_fout, diag_fout,
                             append,
 		                    reverse_flag,
-                            remove_zero_length_flag,
+                            remove_zero_length,
+                            remove_zero_length_allow_bye,
                             year_before,
                             year_after,
                             whitelist,
@@ -635,6 +644,7 @@ public:
     void clear();
     void process_header_line( const std::string &line );
     void process_moves_line( const std::string &line );
+    bool is_game_non_zero_length();
     bool is_game_non_zero_length_or_BYE();
     std::string get_game_as_line(bool reverse_order);
     void fixup_tournament( const std::map<std::string,std::string> &fixup_list );
@@ -855,6 +865,11 @@ std::string Game::get_description()
     return s;
 }
 
+bool Game::is_game_non_zero_length()
+{
+    return( move_txt_len > static_cast<int>(result.length()) );
+}
+
 bool Game::is_game_non_zero_length_or_BYE()
 {
     if( move_txt_len > static_cast<int>(result.length()) )
@@ -979,6 +994,7 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
                     bool append,
                     bool reverse_order,
                     bool remove_zero_length,
+                    bool remove_zero_length_allow_bye,
                     int year_before,
                     int year_after,
                     const std::set<std::string> &whitelist,
@@ -1140,8 +1156,10 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
             {
                 state = (state==process_game_and_exit ? done : search_for_header);
                 bool ok = (game.yyyy>=year_after && game.yyyy<=year_before);
-                if( ok && remove_zero_length )
+                if( ok && remove_zero_length_allow_bye )
                     ok = game.is_game_non_zero_length_or_BYE();
+                if( ok && remove_zero_length )
+                    ok = game.is_game_non_zero_length();
                 std::string t = game.get_yyyy_event_at_site();
                 if( ok && whitelist.size() > 0)
                 {
