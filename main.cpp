@@ -39,6 +39,8 @@
      -w specifies a whitelist list of tournaments, discard games not from these tournaments
      -b specifies a blacklist list of tournaments, discard games from these tournaments
      -f specifies a list of tournament name fixups
+     -2 flag removes games unless both players have been fixed up (useful for
+        cleaning online PGNs with a list of some but not all player handles)
 
     Output is all games found in one game per line format, sorted for maxium utility.
 
@@ -145,6 +147,7 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
                         bool reverse_order,
                         bool remove_zero_length,
                         bool remove_zero_length_allow_bye,
+                        bool remove_unfixed_players_flag,
                         int year_before,
                         int year_after,
                         const std::set<std::string> &whitelist,
@@ -293,6 +296,7 @@ int main( int argc, const char *argv[] )
     bool list_flag = false;
     bool reverse_flag = false;
     bool pgn_create_flag = false;
+    bool remove_unfixed_players_flag = false;
     bool whitelist_flag = false;
     bool smart_uniq = false;
     std::string whitelist_file;
@@ -328,6 +332,8 @@ int main( int argc, const char *argv[] )
             smart_uniq = true;
         else if( std::string(argv[arg_idx]) == "-p" )
             pgn_create_flag = true;
+        else if( std::string(argv[arg_idx]) == "-2" )
+            remove_unfixed_players_flag = true;
         else if( util::prefix( std::string(argv[arg_idx]),"-f") )
         {
             fixup_flag = true;
@@ -427,6 +433,8 @@ int main( int argc, const char *argv[] )
      -w specifies a whitelist list of tournaments, discard games not from these tournaments
      -b specifies a blacklist list of tournaments, discard games from these tournaments
      -f specifies a list of tournament name fixups
+     -2 flag removes games unless both players have been fixed up (useful for
+        cleaning online PGNs with a list of some but not all player handles)
 
 */
 
@@ -465,6 +473,9 @@ int main( int argc, const char *argv[] )
         "\n"
         "Pairs of before and after player names are now allowed in the fixup file,\n"
         "player names are identified as those strings NOT in yyyy Event@Site format\n"
+        "\n"
+        "-2 flag removes games unless both players have been fixed up (useful for\n"
+        "   cleaning online PGNs with a list of some but not all player handles)\n"
         "\n"
         "Output is all games found in one game per line format, sorted. The .lpgn\n"
         "extension shown is just a suggested convention\n"
@@ -546,6 +557,7 @@ int main( int argc, const char *argv[] )
                     reverse_flag,
                     remove_zero_length,
                     remove_zero_length_allow_bye,
+                    remove_unfixed_players_flag,
                     year_before,
                     year_after,
                     whitelist,
@@ -581,6 +593,7 @@ int main( int argc, const char *argv[] )
 		                    reverse_flag,
                             remove_zero_length,
                             remove_zero_length_allow_bye,
+                            remove_unfixed_players_flag,
                             year_before,
                             year_after,
                             whitelist,
@@ -646,6 +659,7 @@ public:
     void process_moves_line( const std::string &line );
     bool is_game_non_zero_length();
     bool is_game_non_zero_length_or_BYE();
+    bool is_both_players_fixed();
     std::string get_game_as_line(bool reverse_order);
     void fixup_tournament( const std::map<std::string,std::string> &fixup_list );
     void fixup_names( const std::map<std::string,std::string> &fixup_list, std::ofstream *p_out_diag );
@@ -668,6 +682,7 @@ private:
     std::string day;
     std::string round;
     std::string result;
+    bool both_players_fixed;
     int move_txt_len;
 	unsigned int game_idx;
 };
@@ -689,6 +704,7 @@ void Game::clear()
     day = "00";
     round.clear();
     result.clear();
+    both_players_fixed = false;
     move_txt_len = 0;
 	game_idx = 0;
 }
@@ -767,6 +783,7 @@ void Game::fixup_names( const std::map<std::string,std::string> &fixup_list, std
             util::putline(*p_out_diag,s);
         }
     }
+    both_players_fixed = (nbr_changes==2);
 }
 
 std::string Game::get_prefix(bool reverse_order)
@@ -877,6 +894,11 @@ bool Game::is_game_non_zero_length_or_BYE()
     std::string w = util::toupper(white);
     std::string b = util::toupper(black);
     return( w=="BYE" || b=="BYE" );
+}
+
+bool Game::is_both_players_fixed()
+{
+    return both_players_fixed;
 }
 
 void Game::process_header_line( const std::string &line )
@@ -995,6 +1017,7 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
                     bool reverse_order,
                     bool remove_zero_length,
                     bool remove_zero_length_allow_bye,
+                    bool remove_unfixed_players_flag,
                     int year_before,
                     int year_after,
                     const std::set<std::string> &whitelist,
@@ -1160,6 +1183,8 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
                     ok = game.is_game_non_zero_length_or_BYE();
                 if( ok && remove_zero_length )
                     ok = game.is_game_non_zero_length();
+                if( ok && remove_unfixed_players_flag )
+                    ok = game.is_both_players_fixed();
                 std::string t = game.get_yyyy_event_at_site();
                 if( ok && whitelist.size() > 0)
                 {
