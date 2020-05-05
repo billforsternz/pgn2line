@@ -22,7 +22,7 @@
     games ready for immediate conversion back into PGN.
 
     Usage:
-     pgn2line [-l] [-z] [-d] [-r] [-p]
+     pgn2line [-l] [-z] [-d] [-n] [-r] [-p]
               [-y year_before] [+y year_after] [-w whitelist | -b blacklist]
               [-f fixuplist]  input output
 
@@ -30,6 +30,7 @@
      -z indicates don't include zero length games (BYEs are unaffected)
      -Z indicates don't include zero length games, including BYEs
      -d indicates smart game de-duplication (eliminates more dups)
+     -n indicates no sorting or de-duping
 	 -r specifies smart reverse sort - yields most recent games first, smart because higher
         rounds/boards are adjusted to come first both here and in the conventional sort
         order
@@ -299,6 +300,7 @@ int main( int argc, const char *argv[] )
     bool remove_unfixed_players_flag = false;
     bool whitelist_flag = false;
     bool smart_uniq = false;
+    bool no_sort = false;
     std::string whitelist_file;
     bool blacklist_flag = false;
     std::string blacklist_file;
@@ -330,6 +332,8 @@ int main( int argc, const char *argv[] )
             remove_zero_length_allow_bye = true;
         else if( std::string(argv[arg_idx]) == "-d" )
             smart_uniq = true;
+        else if( std::string(argv[arg_idx]) == "-n" )
+            no_sort = true;
         else if( std::string(argv[arg_idx]) == "-p" )
             pgn_create_flag = true;
         else if( std::string(argv[arg_idx]) == "-2" )
@@ -416,7 +420,7 @@ int main( int argc, const char *argv[] )
     if( !ok || (whitelist_flag&&blacklist_flag) )
     {
 /*
-     pgn2line [-l] [-z] [-d] [-r] [-p]
+     pgn2line [-l] [-z] [-d] [-n] [-r] [-p]
               [-y year_before] [+y year_after] [-w whitelist | -b blacklist]
               [-f fixuplist]  input output
 
@@ -424,6 +428,7 @@ int main( int argc, const char *argv[] )
      -z indicates don't include zero length games (BYEs are unaffected)
      -Z indicates don't include zero length games, including BYEs
      -d indicates smart game de-duplication (eliminates more dups)
+     -n indicates no sorting or de-duping
 	 -r specifies smart reverse sort - yields most recent games first, smart because higher
         rounds/boards are adjusted to come first both here and in the conventional sort
         order
@@ -442,7 +447,7 @@ int main( int argc, const char *argv[] )
         "Convert pgn file(s) to an intermediate format, one line per game, sorted\n"
         "\n"
         "Usage:\n"
-        " pgn2line [-l] [-z] [-d] [-r] [-p] [-y year_before] [+y year_after]\n"
+        " pgn2line [-l] [-z] [-d] [-n] [-r] [-p] [-y year_before] [+y year_after]\n"
         "          [-w whitelist | -b blacklist]\n"
         "          [-f fixuplist] input output.lpgn\n"
         "\n"
@@ -451,6 +456,7 @@ int main( int argc, const char *argv[] )
         "-z indicates don't include zero length games (BYEs are unaffected)\n"
         "-Z indicates don't include zero length games, including BYEs\n"
         "-d indicates smart game de-duplication (eliminates more dups)\n"
+        "-n indicates no sorting or de-duping\n"
 		"-r specifies smart reverse sort - yields most recent games first, smart\n"
 		"   because higher rounds/boards are adjusted to come first both here and\n"
 		"   in the conventional sort order\n"
@@ -549,6 +555,8 @@ int main( int argc, const char *argv[] )
         r2=rand();
     std::string temp1_fout = util::sprintf( "%s-temp-filename-pgn2line-presort-%05d.tmp", fout.c_str(), r1 );
     std::string temp2_fout = util::sprintf( "%s-temp-filename-pgn2line-postsort-%05d.tmp", fout.c_str(), r2 );
+    if( no_sort )
+        temp1_fout = fout;
     ok = false;
     if( !list_flag )
     {
@@ -608,41 +616,44 @@ int main( int argc, const char *argv[] )
     }
     if( !ok )
         return -1;
-    std::ofstream out_smart_uniq;
-    std::string smart_uniq_msg;
-    if( smart_uniq )
+    if( !no_sort )
     {
-        std::string dedup_fout = "dedup-" + fout;
-        smart_uniq_msg = util::sprintf( ", use file %s to review smart de-duplication decisions", dedup_fout.c_str() );
-        out_smart_uniq.open( dedup_fout.c_str() );
-        if( !out_smart_uniq )
+        std::ofstream out_smart_uniq;
+        std::string smart_uniq_msg;
+        if( smart_uniq )
         {
-            printf( "Warning; Cannot open smart deduplication file %s for writing, so smart dedup disabled\n", dedup_fout.c_str() );
-            smart_uniq_msg = "";
+            std::string dedup_fout = "dedup-" + fout;
+            smart_uniq_msg = util::sprintf( ", use file %s to review smart de-duplication decisions", dedup_fout.c_str() );
+            out_smart_uniq.open( dedup_fout.c_str() );
+            if( !out_smart_uniq )
+            {
+                printf( "Warning; Cannot open smart deduplication file %s for writing, so smart dedup disabled\n", dedup_fout.c_str() );
+                smart_uniq_msg = "";
+            }
         }
+        std::ofstream *p_smart_uniq = (smart_uniq && out_smart_uniq) ? &out_smart_uniq : 0;
+        printf( "%sStarting sort%s\n", list_flag?"\n":"", smart_uniq_msg.c_str() );   // list_flag = newline needed
+        disksort( temp1_fout, temp2_fout, p_smart_uniq );
+	    remove( temp1_fout.c_str() );
+        printf( "Sort complete\n");
+        printf( "Starting refinement sort\n");
+	    if( reverse_flag )
+	    {
+		    refine_sort( temp2_fout, temp1_fout );
+		    printf( "Refinement sort complete\n");
+		    remove( temp2_fout.c_str() );
+		    printf( "Starting reversal sort\n");
+		    disksort( temp1_fout, fout, 0, true, false );
+		    printf( "Reversal sort complete\n");
+		    remove( temp1_fout.c_str() );
+	    }
+	    else
+	    {
+		    refine_sort( temp2_fout, fout );
+		    printf( "Refinement sort complete\n");
+		    remove( temp2_fout.c_str() );
+	    }
     }
-    std::ofstream *p_smart_uniq = (smart_uniq && out_smart_uniq) ? &out_smart_uniq : 0;
-    printf( "%sStarting sort%s\n", list_flag?"\n":"", smart_uniq_msg.c_str() );   // list_flag = newline needed
-    disksort( temp1_fout, temp2_fout, p_smart_uniq );
-	remove( temp1_fout.c_str() );
-    printf( "Sort complete\n");
-    printf( "Starting refinement sort\n");
-	if( reverse_flag )
-	{
-		refine_sort( temp2_fout, temp1_fout );
-		printf( "Refinement sort complete\n");
-		remove( temp2_fout.c_str() );
-		printf( "Starting reversal sort\n");
-		disksort( temp1_fout, fout, 0, true, false );
-		printf( "Reversal sort complete\n");
-		remove( temp1_fout.c_str() );
-	}
-	else
-	{
-		refine_sort( temp2_fout, fout );
-		printf( "Refinement sort complete\n");
-		remove( temp2_fout.c_str() );
-	}
     if( pgn_create_flag )
         line2pgn( fout, fout + ".pgn" );
     return 0;
