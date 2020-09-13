@@ -152,6 +152,7 @@
 #include "util.h"
 
 static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
+                        bool &utf8_bom,
                         bool append,
                         bool reverse_order,
                         bool remove_zero_length,
@@ -171,7 +172,7 @@ static bool test_date_format( const std::string &date, char separator );
 static bool parse_date_format( const std::string &date, char separator, int &yyyy, int &mm, int &dd );
 static bool refine_sort( std::string fin, std::string fout );
 static void word_search( bool case_insignificant, std::string word, std::string fin, std::string fout );
-static void remove_tie_breaker( std::string fin, std::string fout );
+static void remove_tie_breaker( std::string fin, std::string fout, bool add_utf8_bom_to_output );
 
 int main( int argc, const char *argv[] )
 {
@@ -567,9 +568,11 @@ int main( int argc, const char *argv[] )
     if( no_sort )
         temp1_fout = fout;
     ok = false;
+    bool all_utf8_bom = true;
     if( !list_flag )
     {
         ok = pgn2line( fin, temp1_fout, diag_fout,
+                    all_utf8_bom,
                     false,
                     reverse_flag,
                     remove_zero_length,
@@ -605,7 +608,9 @@ int main( int argc, const char *argv[] )
             {
                 file_number++;
                 printf( "Processed %d files\r", file_number );
+                bool utf8_bom;
                 bool any = pgn2line( line, temp1_fout, diag_fout,
+                            utf8_bom,
                             append,
 		                    reverse_flag,
                             remove_zero_length,
@@ -618,7 +623,11 @@ int main( int argc, const char *argv[] )
                             fixups,
                             name_fixups );
                 if( any )  // don't give up unless none of the files are processed
+                {
                     ok = true;
+                    if( !utf8_bom )
+                        all_utf8_bom = false;
+                }
             }
             append = true;
         }
@@ -649,6 +658,7 @@ int main( int argc, const char *argv[] )
 		refine_sort( temp2_fout, temp1_fout );
 		printf( "Refinement sort complete\n");
         remove( temp2_fout.c_str() );
+        bool add_utf8_bom_to_output = all_utf8_bom;
 	    if( reverse_flag )
 	    {
 		    printf( "Starting reversal sort\n");
@@ -656,13 +666,13 @@ int main( int argc, const char *argv[] )
 		    printf( "Reversal sort complete\n");
 		    remove( temp1_fout.c_str() );
 		    printf( "Removing tie breaker field\n");
-            remove_tie_breaker( temp2_fout, fout );
+            remove_tie_breaker( temp2_fout, fout, add_utf8_bom_to_output );
 		    remove( temp2_fout.c_str() );
 	    }
 	    else
 	    {
 		    printf( "Removing tie breaker field\n");
-            remove_tie_breaker( temp1_fout, fout );
+            remove_tie_breaker( temp1_fout, fout, add_utf8_bom_to_output );
 		    remove( temp1_fout.c_str() );
 	    }
     }
@@ -1036,6 +1046,7 @@ std::string Game::get_site_header()
 }
 
 static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
+                    bool &utf8_bom,
                     bool append,
                     bool reverse_order,
                     bool remove_zero_length,
@@ -1049,6 +1060,7 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
                     const std::map<std::string,std::string> &name_fixups )
 {
     Game game;
+    utf8_bom = false;
     std::ifstream in(fin.c_str());
     if( !in )
     {
@@ -1093,9 +1105,12 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
             }
             else
             {
-                // Strip out UTF-8 BOM mark (hex value: EF BB BF)
-                if( line_number==0 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+                // Strip out UTF8 BOM mark (hex value: EF BB BF)
+                if( line_number==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+                {
                     line = line.substr(3);
+                    utf8_bom = true;
+                }
                 util::ltrim(line);
                 util::rtrim(line);
                 line_number++;
@@ -1256,7 +1271,7 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
 }
 
 
-static void remove_tie_breaker( std::string fin, std::string fout )
+static void remove_tie_breaker( std::string fin, std::string fout, bool add_utf8_bom_to_output )
 {
 
 /*
@@ -1277,6 +1292,8 @@ static void remove_tie_breaker( std::string fin, std::string fout )
         printf( "Error; Cannot open file %s for writing\n", fout.c_str() );
         return;
     }
+    if( add_utf8_bom_to_output )
+        out.write( "\xef\xbb\xbf", 3 );
     for(;;)
     {
         std::string line;
@@ -1336,12 +1353,21 @@ static void line2pgn( std::string fin, std::string fout )
         return;
     }
     enum {in_prefix1,in_prefix2,in_header1,in_header2,in_moves1,in_moves2,finished} state=in_prefix1, old_state=in_prefix2;
+    bool first_line = true;
     for(;;)
     {
         std::string line;
         std::string line_out;
         if( !std::getline(in,line) )
             break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF). If it's there, put it in PGN
+        if( first_line && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65 )
+        {
+            line = line.substr(3);
+            out.write( "\xef\xbb\xbf", 3 );
+        }
+        first_line = false;
         const char *p = line.c_str();
         state=in_prefix1;
         old_state=in_prefix2;
