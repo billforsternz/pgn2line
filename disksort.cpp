@@ -24,6 +24,13 @@
 #include "util.h"
 #include "disksort.h"
 
+static bool equal_exact_match( const std::string &s1, const std::string &s2 );
+static bool equal_smart_match( const std::string &s1, const std::string &s2 );
+static bool equal_prefix_only( const std::string &s1, const std::string &s2 );
+static bool equal_moves(const std::string &s1, const std::string &s2);
+static void get_main_line( const std::string &s, std::string &main_line );
+static size_t find_sort_tie_breaker_in_prefix( const std::string &prefix );
+
 // We do a bit of LPGN format specific stuff (LPGN = output of pgn2line)
 static size_t find_sort_tie_breaker_in_prefix( const std::string &prefix )
 {
@@ -51,11 +58,9 @@ static size_t find_sort_tie_breaker_in_prefix( const std::string &prefix )
 	return tie_breaker_offset;
 }
 
-//static std::ofstream debug("debug.txt");
-
 // Compare two strings for equality, if they are in LPGN format, sort tie-breaker fields
 //  do not have to match for equality
-static bool equal_whole_line( const std::string &s1, const std::string &s2 )
+static bool equal_exact_match( const std::string &s1, const std::string &s2 )
 {
 	// Fallback
 	bool eq = (s1 == s2);
@@ -85,13 +90,12 @@ static bool equal_whole_line( const std::string &s1, const std::string &s2 )
 			eq = (prefix1 == prefix2);
 		}
 	}
-    //util::putline( debug, util::sprintf( "equal_whole_line(\n%s,\n%s )\n returns %s\n", s1.c_str(), s2.c_str(), eq?"true":"false" ) );
 	return eq;
 }
 
 // Compare two LPGN prefixes for equality, sort tie-breaker fields
 //  do not have to match for equality
-static bool equal_prefix_only(const std::string &s1, const std::string &s2)
+static bool equal_prefix_only( const std::string &s1, const std::string &s2 )
 {
 	bool eq = false;
 	size_t offset1 = s1.find("@H");
@@ -110,8 +114,113 @@ static bool equal_prefix_only(const std::string &s1, const std::string &s2)
 				prefix2[idx++] = '#';
 		eq = (prefix1 == prefix2);
 	}
-    //util::putline( debug, util::sprintf( "equal_prefix_only(\n%s,\n%s )\n returns %s\n", s1.c_str(), s2.c_str(), eq?"true":"false" ) ); 
 	return eq;
+}
+
+// Compare moves (main line) of two games for equality
+static bool equal_moves(const std::string &s1, const std::string &s2)
+{
+    std::string main_line1;
+    std::string main_line2;
+    get_main_line( s1, main_line1 );
+    get_main_line( s2, main_line2 );
+    return( main_line1 == main_line2 );
+}
+
+static void get_main_line( const std::string &s, std::string &main_line )
+{
+    main_line.clear();
+	size_t offset = s.find("@M");
+	if( offset == std::string::npos )
+        return;
+    offset += 2;
+    int nest_depth = 0;
+    std::string move;
+    size_t len = s.length();
+    enum {in_main_line,in_move,in_variation,in_comment} state=in_main_line, old_state=in_main_line, save_state=in_main_line;
+    while( offset < len )
+    {
+        char c = s[offset];
+        old_state = state;
+        switch( state )
+        {
+            case in_main_line:
+            {
+                if( c == '{' )
+                    state = in_comment;     // comments don't nest
+                else if( c == '(' )
+                {
+                    state = in_variation;
+                    nest_depth = 1;        // variations do nest, so need nest depth
+                }
+                else if ( c == 'M' )
+                    ;  // @M shouldn't change state
+                else if( isascii(c) && isalpha(c) )
+                {
+                    state = in_move;
+                    move = c;
+                }
+                break;
+            }
+            case in_move:
+            {
+                if( c == '{' )
+                    state = in_comment;
+                else if( c == '(' )
+                {
+                    state = in_variation;
+                    nest_depth = 1;
+                }
+                else if( !isascii(c) )
+                    state = in_main_line;
+                else if( c=='+' || c=='#' ) // Qg7#
+                {
+                    move += c;
+                    state = in_main_line;
+                }
+                else if( isalpha(c) || isdigit(c) ||
+                          c=='-' || c=='=' ) // O-O, e8=Q
+                    move += c;
+                else
+                    state = in_main_line;
+                break;
+            }
+            case in_variation:
+            {
+                if( c == '{' )
+                    state = in_comment;
+                else if( c == '(' )
+                    nest_depth++;
+                else if( c == ')' )
+                {
+                    nest_depth--;
+                    if( nest_depth == 0 )
+                        state = in_main_line;
+                }
+                // no need to parse moves in this state, wait until
+                //  we return to in_main_line state
+                break;
+            }
+            case in_comment:
+            {
+                if( c == '}' )
+                    state = save_state;
+                break;
+            }
+        }
+        if( state != old_state )
+        {
+            if( state == in_comment )
+                save_state = old_state;
+            else if( old_state == in_move )
+                main_line += util::tolower(move);
+        }
+    }
+}
+
+static bool equal_smart_match( const std::string &s1, const std::string &s2 )
+{
+    return equal_prefix_only(s1,s2) && equal_moves( s1,s2);
 }
 
 bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, bool reverse, bool uniq )
@@ -224,7 +333,7 @@ bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, 
             {
                 bool run_broken = false;
                 if( lookback.size() > 0 )
-					run_broken = !equal_prefix_only( lookback[lookback.size()-1], output_line );
+					run_broken = !equal_smart_match( lookback[lookback.size()-1], output_line );
 
                 // If run not broken, add output to lookback buffer before possible resolution
                 if( !run_broken )
@@ -240,7 +349,7 @@ bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, 
                     std::string s = lookback[0];
                     for( size_t i=0; i<lookback.size(); i++ )
                     {
-                        if( i>0 && !equal_whole_line(s,lookback[i]) )
+                        if( i>0 && !equal_exact_match(s,lookback[i]) )
                             all_the_same = false;
                         if( lookback[i].length() >= max )
                         {
@@ -262,7 +371,7 @@ bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, 
                             util::replace_once(t,"[White \"","[White \"KEEP ");
                             util::putline(*p_smart_uniq,t);
                         }
-                        else if( !equal_whole_line(t,s) )
+                        else if( !equal_exact_match(t,s) )
                         {
                             s = t;   // Don't show identical discards
                             util::replace_once(t,"[White \"","[White \"DISCARD ");
@@ -285,7 +394,7 @@ bool disksort( std::string fin, std::string fout,  std::ofstream *p_smart_uniq, 
             }
 
             // Else simple uniq feature optionally drops duplicate lines, never drop first line
-            else if( first || !uniq || !equal_whole_line(output_line,previous_line) )
+            else if( first || !uniq || !equal_exact_match(output_line,previous_line) )
             {
                 util::putline(temp_out,output_line);
                 previous_line = output_line;
