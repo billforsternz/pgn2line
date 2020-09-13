@@ -96,6 +96,14 @@
     source order if everything else matches. The first release of this suite lacked this
     feature.
 
+    Note 2: I am now updating the program for Release 3.0, and I am going to remove the tie
+    breaker as a final stage of pgn2line because it makes the .lpgn files dramatically less useful
+    for comparisons - the smallest changes anywhere make for a completely different .lpgn file
+    line by line, only because of the presence of this field. In other words, it is still used
+    internally for intermediate processing (it's very useful) but discarded in a different stage
+    at the end. So externally we are back to the V1.0 format;
+      2001-12-28 Acme Open, Gotham # 2001-12-31 003.002.001 Smith-Jones
+
     The net result is that all games in the tournament are grouped together in date/round
     order. Tournaments are sorted by start date of tournament. This can reasonably be
     considered optimum game ordering.
@@ -163,6 +171,7 @@ static bool test_date_format( const std::string &date, char separator );
 static bool parse_date_format( const std::string &date, char separator, int &yyyy, int &mm, int &dd );
 static bool refine_sort( std::string fin, std::string fout );
 static void word_search( bool case_insignificant, std::string word, std::string fin, std::string fout );
+static void remove_tie_breaker( std::string fin, std::string fout );
 
 int main( int argc, const char *argv[] )
 {
@@ -637,21 +646,24 @@ int main( int argc, const char *argv[] )
 	    remove( temp1_fout.c_str() );
         printf( "Sort complete\n");
         printf( "Starting refinement sort\n");
+		refine_sort( temp2_fout, temp1_fout );
+		printf( "Refinement sort complete\n");
+        remove( temp2_fout.c_str() );
 	    if( reverse_flag )
 	    {
-		    refine_sort( temp2_fout, temp1_fout );
-		    printf( "Refinement sort complete\n");
-		    remove( temp2_fout.c_str() );
 		    printf( "Starting reversal sort\n");
-		    disksort( temp1_fout, fout, 0, true, false );
+		    disksort( temp1_fout, temp2_fout, 0, true, false );
 		    printf( "Reversal sort complete\n");
 		    remove( temp1_fout.c_str() );
+		    printf( "Removing tie breaker field\n");
+            remove_tie_breaker( temp2_fout, fout );
+		    remove( temp2_fout.c_str() );
 	    }
 	    else
 	    {
-		    refine_sort( temp2_fout, fout );
-		    printf( "Refinement sort complete\n");
-		    remove( temp2_fout.c_str() );
+		    printf( "Removing tie breaker field\n");
+            remove_tie_breaker( temp1_fout, fout );
+		    remove( temp1_fout.c_str() );
 	    }
     }
     if( pgn_create_flag )
@@ -1241,6 +1253,71 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
         }
     }
     return true;
+}
+
+
+static void remove_tie_breaker( std::string fin, std::string fout )
+{
+
+/*
+    Line by line transformation
+    In:  2001-12-28 Acme Open, Gotham # 2001-12-31 003.002.001 000000001 Smith-Jones
+    Out: 2001-12-28 Acme Open, Gotham # 2001-12-31 003.002.001 Smith-Jones
+ */
+
+    std::ifstream in(fin);
+    if( !in )
+    {
+        printf( "Error; Cannot open file %s for reading\n", fin.c_str() );
+        return;
+    }
+    std::ofstream out(fout);
+    if( !out )
+    {
+        printf( "Error; Cannot open file %s for writing\n", fout.c_str() );
+        return;
+    }
+    for(;;)
+    {
+        std::string line;
+        std::string line_out;
+        bool expected_format = false;
+        if( !std::getline(in,line) )
+            break;
+        std::string prefix_end = " # ";     // we double up earlier '#' chars to make sure
+                                            //  this doesn't occur earlier in prefix
+        size_t offset = line.find( prefix_end );
+        if( offset != std::string::npos )
+        {
+            offset += 3;
+            size_t offset2 = line.find( ' ', offset );
+            if( offset2!=std::string::npos && offset2==offset+10 )  
+            {
+                offset2++;
+                size_t offset3 = line.find( ' ', offset2 );
+                if( offset3 != std::string::npos )
+                {
+                    offset3++;
+                    size_t offset4 = line.find( ' ', offset3 );
+                    if( offset4!=std::string::npos && offset4==offset3+9 )  
+                    {
+                        offset4++;
+                        expected_format = true;
+                        for( int i=0; expected_format && i<9; i++ )
+                        {
+                            char c = line[offset3+i];
+                            expected_format = (isascii(c) && isdigit(c));
+                        }
+                        if( expected_format )
+                            line_out = line.substr(0,offset3) + line.substr(offset4);
+                    }
+                }
+            }
+        }
+        if( !expected_format )
+            line_out = line;
+        util::putline(out,line_out);
+    }
 }
 
 static void line2pgn( std::string fin, std::string fout )
