@@ -124,7 +124,7 @@ static bool equal_moves(const std::string &s1, const std::string &s2)
     std::string main_line2;
     get_main_line( s1, main_line1 );
     get_main_line( s2, main_line2 );
-    return( main_line1 == main_line2 );
+    return( main_line1.length() > 10 && main_line1 == main_line2 ); // non-trivial and equal
 }
 
 static void get_main_line( const std::string &s, std::string &main_line )
@@ -140,7 +140,7 @@ static void get_main_line( const std::string &s, std::string &main_line )
     enum {in_main_line,in_move,in_variation,in_comment} state=in_main_line, old_state=in_main_line, save_state=in_main_line;
     while( offset < len )
     {
-        char c = s[offset];
+        char c = s[offset++];
         old_state = state;
         switch( state )
         {
@@ -213,7 +213,15 @@ static void get_main_line( const std::string &s, std::string &main_line )
             if( state == in_comment )
                 save_state = old_state;
             else if( old_state == in_move )
-                main_line += util::tolower(move);
+            {
+                if( main_line == "" )
+                    main_line = util::tolower(move);
+                else
+                {
+                    main_line += ' ';
+                    main_line += util::tolower(move);
+                }
+            }
         }
     }
 }
