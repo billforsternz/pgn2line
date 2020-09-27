@@ -300,7 +300,14 @@ int main( int argc, const char *argv[] )
         );
         return -1;
     }
-    line2pgn(argv[1],argv[2]);
+    std::string fin(argv[1]);
+    std::string fout(argv[2]);
+    if( fin == fout )
+    {
+        printf( "Error: input and output filenames are the same.\n" );
+        return -1;
+    }
+    line2pgn(fin,fout);
     return 0;
 #endif
 
@@ -507,6 +514,11 @@ int main( int argc, const char *argv[] )
     std::string fin(argv[arg_idx]);
     std::string fout(argv[arg_idx+1]);
 #endif
+    if( fin == fout )
+    {
+        printf( "Error: input and output filenames are the same.\n" );
+        return -1;
+    }
 
     // Read tournament files
     std::set<std::string> whitelist;
@@ -569,12 +581,12 @@ int main( int argc, const char *argv[] )
         r2=rand();
     std::string temp1_fout = util::sprintf( "%s-temp-filename-pgn2line-presort-%05d.tmp", fout.c_str(), r1 );
     std::string temp2_fout = util::sprintf( "%s-temp-filename-pgn2line-postsort-%05d.tmp", fout.c_str(), r2 );
-    if( no_sort )
-        temp1_fout = fout;
     ok = false;
+    printf( "pgn2line V3.00 (from Github.com/billforsternz/pgn2line)\n" );
     bool all_utf8_bom = true;
     if( !list_flag )
     {
+        printf( "Processing 1 pgn file\n" );
         ok = pgn2line( fin, temp1_fout, diag_fout,
                     all_utf8_bom,
                     false,
@@ -611,7 +623,7 @@ int main( int argc, const char *argv[] )
             if( line != "" )
             {
                 file_number++;
-                printf( "Processed %d files\r", file_number );
+                printf( "Processed %d pgn file%s\r", file_number, file_number==1?"":"s" );
                 bool utf8_bom;
                 bool any = pgn2line( line, temp1_fout, diag_fout,
                             utf8_bom,
@@ -638,7 +650,14 @@ int main( int argc, const char *argv[] )
     }
     if( !ok )
         return -1;
-    if( !no_sort )
+    bool add_utf8_bom_to_output = all_utf8_bom;
+    if( no_sort )
+	{
+		printf( "Removing tie breaker field\n");
+        remove_tie_breaker( temp1_fout, fout, add_utf8_bom_to_output );
+		remove( temp1_fout.c_str() );
+	}
+    else
     {
         std::ofstream out_smart_uniq;
         std::string smart_uniq_msg;
@@ -662,7 +681,6 @@ int main( int argc, const char *argv[] )
 		refine_sort( temp2_fout, temp1_fout );
 		printf( "Refinement sort complete\n");
         remove( temp2_fout.c_str() );
-        bool add_utf8_bom_to_output = all_utf8_bom;
 	    if( reverse_flag )
 	    {
 		    printf( "Starting reversal sort\n");
