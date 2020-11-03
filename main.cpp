@@ -332,11 +332,10 @@ int main( int argc, const char *argv[] )
     // Unless one or both of these are set on the command line
     //  yyyy>=year_after && yyyy<=year_before is true
     int year_after=-10000, year_before=10000;
-
 #ifdef _DEBUG   // for debugging / testing
     smart_uniq = true;
-    std::string fin("welly4.pgn");
-    std::string fout("x.lpgn");
+    std::string fin("test-in.pgn");
+    std::string fout("test-out.lpgn");
 #else
 
     int arg_idx=1;
@@ -464,7 +463,7 @@ int main( int argc, const char *argv[] )
 */
 
         printf(
-        "pgn2line V3.00 (from Github.com/billforsternz/pgn2line)\n"
+        "pgn2line V3.01 (from Github.com/billforsternz/pgn2line)\n"
         "Convert pgn file(s) to an intermediate format, one line per game, sorted\n"
         "\n"
         "Usage:\n"
@@ -582,7 +581,7 @@ int main( int argc, const char *argv[] )
     std::string temp1_fout = util::sprintf( "%s-temp-filename-pgn2line-presort-%05d.tmp", fout.c_str(), r1 );
     std::string temp2_fout = util::sprintf( "%s-temp-filename-pgn2line-postsort-%05d.tmp", fout.c_str(), r2 );
     ok = false;
-    printf( "pgn2line V3.00 (from Github.com/billforsternz/pgn2line)\n" );
+    printf( "pgn2line V3.01 (from Github.com/billforsternz/pgn2line)\n" );
     bool all_utf8_bom = true;
     if( !list_flag )
     {
@@ -610,9 +609,7 @@ int main( int argc, const char *argv[] )
             printf( "Error; Cannot open list file %s\n", fin.c_str() );
             return -1;
         }
-        bool append=false;
-        int file_number=0;
-        ok = false;
+        std::vector<std::string> pgn_files;
         for(;;)
         {
             std::string line;
@@ -621,29 +618,34 @@ int main( int argc, const char *argv[] )
             util::ltrim(line);
             util::rtrim(line);
             if( line != "" )
+                pgn_files.push_back(line);
+        }
+        int nbr_files = pgn_files.size();
+        bool append=false;
+        int file_number=1;
+        ok = false;
+        for( std::string line : pgn_files )
+        {
+            printf( "Processing %d of %d pgn file%s\r", file_number++, nbr_files, nbr_files==1?"":"s" );
+            bool utf8_bom;
+            bool any = pgn2line( line, temp1_fout, diag_fout,
+                        utf8_bom,
+                        append,
+		                reverse_flag,
+                        remove_zero_length,
+                        remove_zero_length_allow_bye,
+                        remove_unfixed_players_flag,
+                        year_before,
+                        year_after,
+                        whitelist,
+                        blacklist,
+                        fixups,
+                        name_fixups );
+            if( any )  // don't give up unless none of the files are processed
             {
-                file_number++;
-                printf( "Processed %d pgn file%s\r", file_number, file_number==1?"":"s" );
-                bool utf8_bom;
-                bool any = pgn2line( line, temp1_fout, diag_fout,
-                            utf8_bom,
-                            append,
-		                    reverse_flag,
-                            remove_zero_length,
-                            remove_zero_length_allow_bye,
-                            remove_unfixed_players_flag,
-                            year_before,
-                            year_after,
-                            whitelist,
-                            blacklist,
-                            fixups,
-                            name_fixups );
-                if( any )  // don't give up unless none of the files are processed
-                {
-                    ok = true;
-                    if( !utf8_bom )
-                        all_utf8_bom = false;
-                }
+                ok = true;
+                if( !utf8_bom )
+                    all_utf8_bom = false;
             }
             append = true;
         }
@@ -1890,7 +1892,7 @@ static bool refine_sort( std::string fin, std::string fout )
                     m.hit = false;
                     m.yyyy = yyyy;
                     m.mm = mm;
-                    m.yyyy_mm = util::sprintf("%04d-%02d ",yyyy,mm);
+                    m.yyyy_mm = util::sprintf("%04d-%02d",yyyy,mm);
                     m.tournaments.clear();
                     replay_line = true;
                 }
@@ -1967,20 +1969,17 @@ static bool refine_sort( std::string fin, std::string fout )
                         {
 
                             // Months is restricted to never hold any more than the 6 previous months,
-                            //  if a tournament reappears every month for more than 6 months, stop
+                            //  So if a tournament reappears every month for more than 6 months, stop
                             //  trying to associate it to that first month
-                            Month &previous_month  = months[0];
-                            if( months.size()==6 || !previous_month.hit )
+                            Month &old_month = months[0];
+                            if( months.size()>=6 || !old_month.hit )
                             {
 
-                                // Pop the old and/or disused month off the front of the queue
-                                months.pop_front();
-
-                                // Write the corresponding lines out to file
+                                // Write lines even older than old_month out to file
                                 while( main_buffer.size() )
                                 {
                                     std::string l = main_buffer[0];
-                                    if( l.substr(0,8) != previous_month.yyyy_mm )
+                                    if( l.substr(0,7) == old_month.yyyy_mm )
                                         break;
                                     else
                                     {
@@ -1988,6 +1987,10 @@ static bool refine_sort( std::string fin, std::string fout )
                                         main_buffer.pop_front();
                                     }
                                 }
+
+                                // Pop the old and/or disused month off the front of the queue
+                                // Note this invalidates old_month, don't do it too soon!
+                                months.pop_front();
                             }
                             else
                                 break;  // stop when we reach a buffered month that's been hit
