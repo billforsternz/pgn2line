@@ -334,7 +334,9 @@ int main( int argc, const char *argv[] )
     int year_after=-10000, year_before=10000;
 #ifdef _DEBUG   // for debugging / testing
     smart_uniq = true;
-    std::string fin("test-in.pgn");
+    pgn_create_flag = true;
+    list_flag = true;
+    std::string fin("test-in-plus-test-in2.lst");
     std::string fout("test-out.lpgn");
 #else
 
@@ -463,7 +465,7 @@ int main( int argc, const char *argv[] )
 */
 
         printf(
-        "pgn2line V3.02 (from Github.com/billforsternz/pgn2line)\n"
+        "pgn2line V3.02+ (from Github.com/billforsternz/pgn2line)\n"
         "Convert pgn file(s) to an intermediate format, one line per game, sorted\n"
         "\n"
         "Usage:\n"
@@ -1301,6 +1303,73 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
     return true;
 }
 
+struct CANDIDATE
+{
+    std::string line;
+    bool keep;
+};
+
+
+std::vector<CANDIDATE> postponed_dedup;
+std::vector<const CANDIDATE*> sorted;
+
+bool sort_func(const CANDIDATE* lhs, const CANDIDATE* rhs)
+{
+    return (lhs->line) > (rhs->line);
+}
+
+void postponed_dedup_filter( bool flush, const std::string &line, std::ofstream &out )
+{
+    size_t len = postponed_dedup.size();
+    static std::string cached_day;
+    if (!flush)
+    {
+        std::string day;
+        CANDIDATE c;
+        c.line = line;
+        c.keep = true;
+        postponed_dedup.push_back(c);
+        sorted.push_back(&postponed_dedup[len]);
+        std::string prefix_end = " # ";     // we double up earlier '#' chars to make sure
+                                            //  this doesn't occur earlier in prefix
+        size_t offset = line.find(prefix_end);
+        if (offset != std::string::npos)
+        {
+            offset += 3;
+            size_t offset2 = line.find(' ', offset);
+            if (offset2 != std::string::npos && offset2 == offset + 10)
+                day = line.substr(0, offset2);
+        }
+        if (len == 0)
+        {
+            if (day.length() > 0)
+                cached_day = day;
+            else
+                flush = true;
+        }
+        if (len >= 1 && cached_day != day)
+            flush = true;
+    }
+    if( flush )
+    {
+        std::sort( sorted.begin(), sorted.end(), sort_func );
+        const CANDIDATE *prev = NULL;
+        for (CANDIDATE *p : sorted)
+        {
+            if (prev && p->line == prev->line)
+                p->keep = false;
+            prev = p;
+        }
+        for (const CANDIDATE& c : postponed_dedup)
+        {
+            if (c.keep)
+                util::putline(out, c.line );
+        }
+        postponed_dedup.clear();
+        sorted.clear();
+        cached_day.clear();
+    }
+}
 
 static void remove_tie_breaker( std::string fin, std::string fout, bool add_utf8_bom_to_output )
 {
@@ -1362,10 +1431,11 @@ static void remove_tie_breaker( std::string fin, std::string fout, bool add_utf8
                 }
             }
         }
-        if( !expected_format )
+        if (!expected_format)
             line_out = line;
-        util::putline(out,line_out);
+        postponed_dedup_filter(false,line_out,out);
     }
+    postponed_dedup_filter(true, "", out);
 }
 
 static void line2pgn( std::string fin, std::string fout )
