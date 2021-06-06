@@ -1309,65 +1309,84 @@ struct CANDIDATE
     bool keep;
 };
 
-
 std::vector<CANDIDATE> postponed_dedup;
-std::vector<const CANDIDATE*> sorted;
+std::vector<CANDIDATE*> sorted;
 
 bool sort_func(const CANDIDATE* lhs, const CANDIDATE* rhs)
 {
-    return (lhs->line) > (rhs->line);
+    return (lhs->line) < (rhs->line);
 }
 
 void postponed_dedup_filter( bool flush, const std::string &line, std::ofstream &out )
 {
     size_t len = postponed_dedup.size();
     static std::string cached_day;
-    if (!flush)
+    bool have_line = !flush;
+
+    // Calculate the tournament plus date = 'day', eg
+    // line = "2001-12-28 Acme Open, Gotham # 2001-12-31 003.002.001 Smith-Jones...
+    // day  = "2001-12-28 Acme Open, Gotham # 2001-12-31"
+    std::string day;
+    if( have_line )
     {
-        std::string day;
-        CANDIDATE c;
-        c.line = line;
-        c.keep = true;
-        postponed_dedup.push_back(c);
-        sorted.push_back(&postponed_dedup[len]);
         std::string prefix_end = " # ";     // we double up earlier '#' chars to make sure
                                             //  this doesn't occur earlier in prefix
         size_t offset = line.find(prefix_end);
-        if (offset != std::string::npos)
+        if( offset != std::string::npos )
         {
             offset += 3;
             size_t offset2 = line.find(' ', offset);
-            if (offset2 != std::string::npos && offset2 == offset + 10)
+            if( offset2 != std::string::npos && offset2 == offset + 10)
                 day = line.substr(0, offset2);
         }
-        if (len == 0)
-        {
-            if (day.length() > 0)
-                cached_day = day;
-            else
-                flush = true;
-        }
-        if (len >= 1 && cached_day != day)
-            flush = true;
+        if( len >= 1 && cached_day != day)
+            flush = true;  // flush buffered lines, before storing this one
     }
+
+    // All games in one 'day' are collected together and deduped
     if( flush )
     {
+        sorted.clear();
+        for( CANDIDATE &c: postponed_dedup )
+            sorted.push_back( &c );
         std::sort( sorted.begin(), sorted.end(), sort_func );
         const CANDIDATE *prev = NULL;
-        for (CANDIDATE *p : sorted)
+        for( CANDIDATE *p : sorted )
         {
-            if (prev && p->line == prev->line)
+            if( prev && p->line == prev->line )
                 p->keep = false;
             prev = p;
         }
-        for (const CANDIDATE& c : postponed_dedup)
+        for( const CANDIDATE& c : postponed_dedup )
         {
-            if (c.keep)
-                util::putline(out, c.line );
+            if( c.keep )
+                util::putline( out, c.line );
         }
         postponed_dedup.clear();
         sorted.clear();
         cached_day.clear();
+        len = 0;
+    }
+
+    // Store the line
+    if( have_line )
+    {
+        CANDIDATE c;
+        c.line = line;
+        c.keep = true;
+        postponed_dedup.push_back(c);
+
+        // Don't start a collection of games in one 'day' without a cached day to compare later games to
+        if( len == 0 )
+        {
+            if( day.length() > 0 )
+                cached_day = day;
+            else
+            {
+                util::putline( out, line );    // dump the game immediately
+                postponed_dedup.clear();
+            }
+        }
     }
 }
 
@@ -1431,9 +1450,13 @@ static void remove_tie_breaker( std::string fin, std::string fout, bool add_utf8
                 }
             }
         }
-        if (!expected_format)
+        if( !expected_format )
             line_out = line;
+#if 1
         postponed_dedup_filter(false,line_out,out);
+#else
+        util::putline( out, line_out );
+#endif
     }
     postponed_dedup_filter(true, "", out);
 }
