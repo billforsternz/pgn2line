@@ -172,7 +172,8 @@ static bool test_date_format( const std::string &date, char separator );
 static bool parse_date_format( const std::string &date, char separator, int &yyyy, int &mm, int &dd );
 static bool refine_sort( std::string fin, std::string fout );
 static void word_search( bool case_insignificant, std::string word, std::string fin, std::string fout );
-static void remove_tie_breaker( std::string fin, std::string fout, bool add_utf8_bom_to_output );
+static void remove_tie_breaker_and_dups( std::string fin, std::string fout, bool add_utf8_bom_to_output, std::ofstream *p_smart_uniq, bool no_deduping_at_all=false );
+static void postponed_dedup_filter( bool flush, const std::string &line, std::ofstream &out, std::ofstream *p_smart_uniq );
 
 int main( int argc, const char *argv[] )
 {
@@ -583,7 +584,7 @@ int main( int argc, const char *argv[] )
     std::string temp1_fout = util::sprintf( "%s-temp-filename-pgn2line-presort-%05d.tmp", fout.c_str(), r1 );
     std::string temp2_fout = util::sprintf( "%s-temp-filename-pgn2line-postsort-%05d.tmp", fout.c_str(), r2 );
     ok = false;
-    printf( "pgn2line V3.02 (from Github.com/billforsternz/pgn2line)\n" );
+    printf( "pgn2line V3.02+ (from Github.com/billforsternz/pgn2line)\n" );
     bool all_utf8_bom = true;
     if( !list_flag )
     {
@@ -664,7 +665,7 @@ int main( int argc, const char *argv[] )
     if( no_sort )
 	{
 		printf( "Removing tie breaker field\n");
-        remove_tie_breaker( temp1_fout, fout, add_utf8_bom_to_output );
+        remove_tie_breaker_and_dups( temp1_fout, fout, add_utf8_bom_to_output, NULL, true );
 		remove( temp1_fout.c_str() );
 	}
     else
@@ -683,8 +684,8 @@ int main( int argc, const char *argv[] )
             }
         }
         std::ofstream *p_smart_uniq = (smart_uniq && out_smart_uniq) ? &out_smart_uniq : 0;
-        printf( "%sStarting sort%s\n", list_flag?"\n":"", smart_uniq_msg.c_str() );   // list_flag = newline needed
-        disksort( temp1_fout, temp2_fout, p_smart_uniq );
+        printf( "%sStarting sort\n", list_flag?"\n":"" );   // list_flag = newline needed
+        disksort( temp1_fout, temp2_fout );
 	    remove( temp1_fout.c_str() );
         printf( "Sort complete\n");
         printf( "Starting refinement sort\n");
@@ -694,17 +695,17 @@ int main( int argc, const char *argv[] )
 	    if( reverse_flag )
 	    {
 		    printf( "Starting reversal sort\n");
-		    disksort( temp1_fout, temp2_fout, 0, true, false );
+		    disksort( temp1_fout, temp2_fout, true );
 		    printf( "Reversal sort complete\n");
 		    remove( temp1_fout.c_str() );
-		    printf( "Removing tie breaker field\n");
-            remove_tie_breaker( temp2_fout, fout, add_utf8_bom_to_output );
+		    printf( "Removing tie breaker field and dups%s\n", smart_uniq_msg.c_str() );
+            remove_tie_breaker_and_dups( temp2_fout, fout, add_utf8_bom_to_output, p_smart_uniq );
 		    remove( temp2_fout.c_str() );
 	    }
 	    else
 	    {
-		    printf( "Removing tie breaker field\n");
-            remove_tie_breaker( temp1_fout, fout, add_utf8_bom_to_output );
+		    printf( "Removing tie breaker field and dups%s\n", smart_uniq_msg.c_str() );
+            remove_tie_breaker_and_dups( temp1_fout, fout, add_utf8_bom_to_output, p_smart_uniq );
 		    remove( temp1_fout.c_str() );
 	    }
     }
@@ -1272,28 +1273,6 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
                 if( ok )
                 {
                     std::string line_out = game.get_game_as_line(reverse_order);
-#if 0               // Windows/DOS sort.exe cannot cope with lines longer than 65000 characters, we used to
-                    //  truncate lines for that reason - now we have our own disksort()
-                    unsigned int maxlen = 65000;
-                    if( line_out.length() > maxlen )
-                    {
-                        if( truncate )
-                        {
-                            std::string apology = "@M{Sorry pgn2line.exe output line too long, game truncated}";
-                            unsigned int offset = maxlen-apology.length(); 
-                            for( int count=0; line_out[offset]!=' ' && count<100; count++ )
-                                offset--;   // scan back a bit looking for a good place to append apology
-                            if( line_out[offset] != ' ' )
-                                offset = maxlen-apology.length();   // scan back didn't succeed, oh well
-                            line_out = line_out.substr(0,offset) + apology;
-                        }
-                        std::string prefix = game.get_prefix(reverse_order);
-                        printf( "Warning: Line longer than %u characters %s. File: %s Game prefix: %s\n",
-                            maxlen,
-                            truncate?"(-t flag set, so line was truncated)":"(invoke with -t to truncate such lines)",
-                            fin.c_str(), prefix.c_str() );
-                    }
-#endif
                     util::putline(out,line_out);
                 }
                 break;
@@ -1303,94 +1282,7 @@ static bool pgn2line( std::string fin, std::string fout, std::string diag_fout,
     return true;
 }
 
-struct CANDIDATE
-{
-    std::string line;
-    bool keep;
-};
-
-std::vector<CANDIDATE> postponed_dedup;
-std::vector<CANDIDATE*> sorted;
-
-bool sort_func(const CANDIDATE* lhs, const CANDIDATE* rhs)
-{
-    return (lhs->line) < (rhs->line);
-}
-
-void postponed_dedup_filter( bool flush, const std::string &line, std::ofstream &out )
-{
-    size_t len = postponed_dedup.size();
-    static std::string cached_day;
-    bool have_line = !flush;
-
-    // Calculate the tournament plus date = 'day', eg
-    // line = "2001-12-28 Acme Open, Gotham # 2001-12-31 003.002.001 Smith-Jones...
-    // day  = "2001-12-28 Acme Open, Gotham # 2001-12-31"
-    std::string day;
-    if( have_line )
-    {
-        std::string prefix_end = " # ";     // we double up earlier '#' chars to make sure
-                                            //  this doesn't occur earlier in prefix
-        size_t offset = line.find(prefix_end);
-        if( offset != std::string::npos )
-        {
-            offset += 3;
-            size_t offset2 = line.find(' ', offset);
-            if( offset2 != std::string::npos && offset2 == offset + 10)
-                day = line.substr(0, offset2);
-        }
-        if( len >= 1 && cached_day != day)
-            flush = true;  // flush buffered lines, before storing this one
-    }
-
-    // All games in one 'day' are collected together and deduped
-    if( flush )
-    {
-        sorted.clear();
-        for( CANDIDATE &c: postponed_dedup )
-            sorted.push_back( &c );
-        std::sort( sorted.begin(), sorted.end(), sort_func );
-        const CANDIDATE *prev = NULL;
-        for( CANDIDATE *p : sorted )
-        {
-            if( prev && p->line == prev->line )
-                p->keep = false;
-            prev = p;
-        }
-        for( const CANDIDATE& c : postponed_dedup )
-        {
-            if( c.keep )
-                util::putline( out, c.line );
-        }
-        postponed_dedup.clear();
-        sorted.clear();
-        cached_day.clear();
-        len = 0;
-    }
-
-    // Store the line
-    if( have_line )
-    {
-        CANDIDATE c;
-        c.line = line;
-        c.keep = true;
-        postponed_dedup.push_back(c);
-
-        // Don't start a collection of games in one 'day' without a cached day to compare later games to
-        if( len == 0 )
-        {
-            if( day.length() > 0 )
-                cached_day = day;
-            else
-            {
-                util::putline( out, line );    // dump the game immediately
-                postponed_dedup.clear();
-            }
-        }
-    }
-}
-
-static void remove_tie_breaker( std::string fin, std::string fout, bool add_utf8_bom_to_output )
+static void remove_tie_breaker_and_dups( std::string fin, std::string fout, bool add_utf8_bom_to_output, std::ofstream *p_smart_uniq, bool no_deduping_at_all )
 {
 
 /*
@@ -1452,14 +1344,14 @@ static void remove_tie_breaker( std::string fin, std::string fout, bool add_utf8
         }
         if( !expected_format )
             line_out = line;
-#if 1
-        postponed_dedup_filter(false,line_out,out);
-#else
-        util::putline( out, line_out );
-#endif
+        if( !no_deduping_at_all )
+            postponed_dedup_filter( false,line_out,out,p_smart_uniq );
+        else
+            util::putline( out,line_out );        // straight out without going through dedup filter
     }
-    postponed_dedup_filter(true, "", out);
-}
+    if( !no_deduping_at_all )
+        postponed_dedup_filter(true, "", out, p_smart_uniq );
+}                                                                     
 
 static void line2pgn( std::string fin, std::string fout )
 {
@@ -2397,6 +2289,375 @@ static void word_search( bool case_insignificant, std::string word, std::string 
             else
             {
                 offset = next;
+            }
+        }
+    }
+}
+
+//static bool equal_exact_match( const std::string &s1, const std::string &s2 );
+static bool equal_smart_match( const std::string &s1, const std::string &s2 );
+static bool equal_prefix_only( const std::string &s1, const std::string &s2 );
+static bool equal_moves(const std::string &s1, const std::string &s2);
+static void get_main_line( const std::string &s, std::string &main_line );
+//static size_t find_sort_tie_breaker_in_prefix( const std::string &prefix );
+
+// We do a bit of LPGN format specific stuff (LPGN = output of pgn2line)
+#if 0  // We now dedup AFTER sort tie-breaker fields have been removed
+static size_t find_sort_tie_breaker_in_prefix( const std::string &prefix )
+{
+    // Prefix format is now;
+    //  "1984-02-01 Reykjavik Open, Reykjavik # 1984-02-01 01 012345678 Chandler-Taylor"
+    //  9 digit number (012345678 here) is the sorting tie breaker offset, it's the
+    //  game index, so if everything else matches, try to keep the order from the
+    //  original PGNs
+    size_t tie_breaker_offset = std::string::npos;
+    size_t offset = prefix.find_last_of(' ');
+    if( offset != std::string::npos )
+    {
+        if( offset > 10 )
+        {
+            size_t base = offset-9;
+            if( prefix[base-1] == ' ' )
+            {
+                std::string tie_breaker = prefix.substr(base,9);
+                bool only_digits = (std::string::npos == tie_breaker.find_first_not_of("0123456789"));
+                if( only_digits )
+                    tie_breaker_offset = base;
+            }
+        }
+    }
+    return tie_breaker_offset;
+}
+#endif
+
+// Compare two strings for equality, if they are in LPGN format, sort tie-breaker fields
+//  do not have to match for equality
+#if 0  // We now dedup AFTER sort tie-breaker fields have been removed
+static bool equal_exact_match( const std::string &s1, const std::string &s2 )
+{
+    // Fallback
+    bool eq = (s1 == s2);
+
+    // Check for LPGN format
+    size_t offset1 = s1.find("@H");
+    size_t offset2 = s2.find("@H");
+    if( !eq && offset1 != std::string::npos && offset2 != std::string::npos && offset1==offset2 )
+    {
+
+        // LPGN might still match,
+        //  Do suffixes match? (suffix = rest of string after prefix)
+        if( s1.substr(offset1) == s2.substr(offset2) )
+        {
+
+            // Suffixes match, test if prefixes match
+            std::string  prefix1 = s1.substr(0, offset1);
+            std::string  prefix2 = s2.substr(0, offset2);
+            size_t idx = find_sort_tie_breaker_in_prefix( prefix1 );
+            if( idx != std::string::npos )
+                for( int i=0; i<9; i++ )
+                    prefix1[idx++] = '#';	// fast way of making tie breakers (in throwaway strings) equal
+            idx = find_sort_tie_breaker_in_prefix( prefix2 );
+            if( idx != std::string::npos )
+                for( int i=0; i<9; i++ )
+                    prefix2[idx++] = '#';
+            eq = (prefix1 == prefix2);
+        }
+    }
+    return eq;
+}
+#endif
+
+// Compare two LPGN prefixes for equality, sort tie-breaker fields
+//  do not have to match for equality
+static bool equal_prefix_only( const std::string &s1, const std::string &s2 )
+{
+    bool eq = false;
+    size_t offset1 = s1.find("@H");
+    size_t offset2 = s2.find("@H");
+    if( offset1 != std::string::npos && offset2 != std::string::npos && offset1==offset2 )
+    {
+        std::string  prefix1 = s1.substr(0, offset1);
+        std::string  prefix2 = s2.substr(0, offset2);
+        eq = (prefix1 == prefix2);
+    }
+    return eq;
+}
+
+// Compare moves (main line) of two games for equality
+static bool equal_moves(const std::string &s1, const std::string &s2)
+{
+    std::string main_line1;
+    std::string main_line2;
+    get_main_line( s1, main_line1 );
+    get_main_line( s2, main_line2 );
+    return( main_line1.length() > 10 && main_line1 == main_line2 ); // non-trivial and equal
+}
+
+static void get_main_line( const std::string &s, std::string &main_line )
+{
+    main_line.clear();
+    size_t offset = s.find("@M");
+    if( offset == std::string::npos )
+        return;
+    offset += 2;
+    int nest_depth = 0;
+    std::string move;
+    size_t len = s.length();
+    enum {in_main_line,in_move,in_variation,in_comment} state=in_main_line, old_state=in_main_line, save_state=in_main_line;
+    while( offset < len )
+    {
+        char c = s[offset++];
+        old_state = state;
+        switch( state )
+        {
+            case in_main_line:
+            {
+                if( c == '{' )
+                    state = in_comment;     // comments don't nest
+                else if( c == '(' )
+                {
+                    state = in_variation;
+                    nest_depth = 1;        // variations do nest, so need nest depth
+                }
+                else if ( c == 'M' )
+                    ;  // @M shouldn't change state
+                else if( isascii(c) && isalpha(c) )
+                {
+                    state = in_move;
+                    move = c;
+                }
+                break;
+            }
+            case in_move:
+            {
+                if( c == '{' )
+                    state = in_comment;
+                else if( c == '(' )
+                {
+                    state = in_variation;
+                    nest_depth = 1;
+                }
+                else if( !isascii(c) )
+                    state = in_main_line;
+                else if( c=='+' || c=='#' ) // Qg7#
+                {
+                    move += c;
+                    state = in_main_line;
+                }
+                else if( isalpha(c) || isdigit(c) ||
+                    c=='-' || c=='=' ) // O-O, e8=Q
+                    move += c;
+                else
+                    state = in_main_line;
+                break;
+            }
+            case in_variation:
+            {
+                if( c == '{' )
+                    state = in_comment;
+                else if( c == '(' )
+                    nest_depth++;
+                else if( c == ')' )
+                {
+                    nest_depth--;
+                    if( nest_depth == 0 )
+                        state = in_main_line;
+                }
+                // no need to parse moves in this state, wait until
+                //  we return to in_main_line state
+                break;
+            }
+            case in_comment:
+            {
+                if( c == '}' )
+                    state = save_state;
+                break;
+            }
+        }
+        if( state != old_state )
+        {
+            if( state == in_comment )
+                save_state = old_state;
+            else if( old_state == in_move )
+            {
+                if( main_line == "" )
+                    main_line = util::tolower(move);
+                else
+                {
+                    main_line += ' ';
+                    main_line += util::tolower(move);
+                }
+            }
+        }
+    }
+}
+
+static bool equal_smart_match( const std::string &s1, const std::string &s2 )
+{
+    return equal_prefix_only(s1,s2) && equal_moves( s1,s2);
+}
+
+struct CANDIDATE
+{
+    std::string line;
+    bool keep;
+};
+
+static std::vector<CANDIDATE> postponed_dedup;
+
+static bool sort_func(const CANDIDATE* lhs, const CANDIDATE* rhs)
+{
+    return (lhs->line) < (rhs->line);
+}
+
+static void postponed_dedup_filter( bool flush, const std::string &line, std::ofstream &out, std::ofstream *p_smart_uniq )
+{
+    static std::string cached_day;
+    bool have_line = !flush;
+
+    // Calculate the tournament plus date = 'day', eg
+    // line = "2001-12-28 Acme Open, Gotham # 2001-12-31 003.002.001 Smith-Jones...
+    // day  = "2001-12-28 Acme Open, Gotham # 2001-12-31"
+    std::string day;
+    if( have_line )
+    {
+        std::string prefix_end = " # ";     // we double up earlier '#' chars to make sure
+                                            //  this doesn't occur earlier in prefix
+        size_t offset = line.find(prefix_end);
+        if( offset != std::string::npos )
+        {
+            offset += 3;
+            size_t offset2 = line.find(' ', offset);
+            if( offset2 != std::string::npos && offset2 == offset + 10)
+                day = line.substr(0, offset2);
+        }
+        if( postponed_dedup.size() >= 1 && cached_day != day)
+            flush = true;  // flush buffered lines, before storing this one
+    }
+
+    // All games in one 'day' are collected together and deduped
+    if( flush )
+    {
+        std::vector<CANDIDATE*> sorted;
+        for( CANDIDATE &c: postponed_dedup )
+            sorted.push_back( &c );
+        std::sort( sorted.begin(), sorted.end(), sort_func );
+
+        // Smart deduplication ?
+        if( p_smart_uniq )
+        {
+            size_t len = sorted.size();
+            bool in_run=false;
+            unsigned int run_idx = 0;
+            unsigned int run_len = 0;
+            for( unsigned int i=1; i<len; i++ )
+            {
+
+                // Monitor runs of duplicate games
+                CANDIDATE *p = sorted[i];
+                CANDIDATE *q = sorted[i-1];
+                bool match = (p->line==q->line) || equal_smart_match( p->line, q->line );
+                if( match )
+                {
+                    if( in_run )
+                        run_len++;
+                    else
+                    {
+                        in_run = true;
+                        run_idx = i-1;
+                        run_len = 2;
+                    }
+                }
+
+                // Resolve completed runs of duplicate games
+                bool more = (i+1<len);
+                if( run_len>1 && (!match || !more) )
+                {
+                    unsigned int max=0;
+                    unsigned int the_one=run_idx;
+                    bool all_the_same=true;
+                    std::string s = sorted[run_idx]->line;
+
+                    // Find the longest game in the run
+                    for( unsigned int j=run_idx; j<run_idx+run_len; j++ )
+                    {
+                        sorted[j]->keep = false;
+                        if( j>run_idx && s!=sorted[j]->line )
+                            all_the_same = false;
+                        if( sorted[j]->line.length() >= max )
+                        {
+                            max = sorted[j]->line.length();
+                            the_one = j;   
+                        }
+                    }
+
+                    // Keep the selected game only
+                    sorted[the_one]->keep = true;
+
+                    // If they weren't all the same, append to diagnostics file to show what we did
+                    s = "";
+                    for( unsigned int j=run_idx; !all_the_same && j<run_idx+run_len; j++ )
+                    {
+                        std::string t = sorted[j]->line;
+                        if( j == the_one )
+                        {
+                            util::replace_once(t,"[White \"","[White \"KEEP ");
+                            util::putline(*p_smart_uniq,t);
+                        }
+                        else if( t != s )
+                        {
+                            s = t;   // Don't show identical discards
+                            util::replace_once(t,"[White \"","[White \"DISCARD ");
+                            util::putline(*p_smart_uniq,t);
+                        }
+                    }
+
+                    // Run has been processed
+                    in_run = false;
+                    run_len = 0;
+                }
+            }
+        }
+
+        // Else drop exact duplicate lines only
+        else
+        {
+            const CANDIDATE *prev = NULL;
+            for( CANDIDATE *p : sorted )
+            {
+                if( prev && p->line == prev->line )
+                    p->keep = false;
+                prev = p;
+            }
+        }
+
+        // Note that we don't reorder the games, we just drop dups we found by reordering temporarily
+        for( const CANDIDATE& c : postponed_dedup )
+        {
+            if( c.keep )
+                util::putline( out, c.line );
+        }
+        postponed_dedup.clear();
+        cached_day.clear();
+    }
+
+    // Store the line
+    if( have_line )
+    {
+        CANDIDATE c;
+        c.line = line;
+        c.keep = true;
+        postponed_dedup.push_back(c);
+
+        // Don't start a collection of games in one 'day' without a cached day to compare later games to
+        if( postponed_dedup.size() == 1 )
+        {
+            if( day.length() > 0 )
+                cached_day = day;
+            else
+            {
+                util::putline( out, line );    // dump the game immediately
+                postponed_dedup.clear();
             }
         }
     }
