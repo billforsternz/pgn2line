@@ -466,7 +466,7 @@ int main( int argc, const char *argv[] )
 */
 
         printf(
-        "pgn2line V3.02+ (from Github.com/billforsternz/pgn2line)\n"
+        "pgn2line V3.03 (from Github.com/billforsternz/pgn2line)\n"
         "Convert pgn file(s) to an intermediate format, one line per game, sorted\n"
         "\n"
         "Usage:\n"
@@ -584,7 +584,7 @@ int main( int argc, const char *argv[] )
     std::string temp1_fout = util::sprintf( "%s-temp-filename-pgn2line-presort-%05d.tmp", fout.c_str(), r1 );
     std::string temp2_fout = util::sprintf( "%s-temp-filename-pgn2line-postsort-%05d.tmp", fout.c_str(), r2 );
     ok = false;
-    printf( "pgn2line V3.02+ (from Github.com/billforsternz/pgn2line)\n" );
+    printf( "pgn2line V3.03 (from Github.com/billforsternz/pgn2line)\n" );
     bool all_utf8_bom = true;
     if( !list_flag )
     {
@@ -2203,9 +2203,24 @@ static bool test_date_format( const std::string &date, char separator )
 // January in cases where there are games with unknown month/day between them
 static bool parse_date_format( const std::string &date, char separator, int &yyyy, int &mm, int &dd )
 {
+    bool ok=false;
+
+    // Special case - allow PGN date field only to just be a year
+    if( separator=='.' && date.length()==4 )
+    {
+        yyyy = atoi(date.c_str());
+        ok = (date.find_first_not_of("0123456789?") == std::string::npos);
+        if( ok )
+        {
+            mm = 1;
+            dd = 1;
+            return true;
+        }
+    }
+
     // Test that for yyyy.mm.dd, each of yyyy, mm, and dd are present
     //  and numeric
-    bool ok = date.length()>=10 && date[4]==separator && date[7]==separator;
+    ok = date.length()>=10 && date[4]==separator && date[7]==separator;
     for( int i=0; ok && i<3; i++ )
     {
         std::string s;
@@ -2573,18 +2588,24 @@ static void postponed_dedup_filter( bool flush, const std::string &line, std::of
                 bool more = (i+1<len);
                 if( run_len>1 && (!match || !more) )
                 {
+
+                    // Find the longest game in the run, and the earliest line in the run
                     unsigned int max=0;
                     unsigned int the_one=run_idx;
                     bool all_the_same=true;
-                    std::string s = sorted[run_idx]->line;
-
-                    // Find the longest game in the run
-                    for( unsigned int j=run_idx; j<run_idx+run_len; j++ )
+                    CANDIDATE *r = sorted[run_idx];
+                    CANDIDATE *earliest = r;
+                    r->keep = false;
+                    std::string s = r->line;
+                    for( unsigned int j=run_idx+1; j<run_idx+run_len; j++ )
                     {
-                        sorted[j]->keep = false;
-                        if( j>run_idx && s!=sorted[j]->line )
+                        r = sorted[j];
+                        r->keep = false;
+                        if( r < earliest )
+                            earliest = r;
+                        if( s != r->line )
                             all_the_same = false;
-                        if( sorted[j]->line.length() >= max )
+                        if( r->line.length() > max )
                         {
                             max = sorted[j]->line.length();
                             the_one = j;   
@@ -2612,6 +2633,14 @@ static void postponed_dedup_filter( bool flush, const std::string &line, std::of
                         }
                     }
 
+                    // Replace the earliest of the matching group with the line we are keeping 
+                    if( !all_the_same && earliest != sorted[the_one] )
+                    {
+                        earliest->line = sorted[the_one]->line;
+                        earliest->keep = true;
+                        sorted[the_one]->keep = false;
+                    }
+
                     // Run has been processed
                     in_run = false;
                     run_len = 0;
@@ -2632,6 +2661,7 @@ static void postponed_dedup_filter( bool flush, const std::string &line, std::of
         }
 
         // Note that we don't reorder the games, we just drop dups we found by reordering temporarily
+        //  (there's now an exception to this - later annotated games replace earlier bare games)
         for( const CANDIDATE& c : postponed_dedup )
         {
             if( c.keep )
