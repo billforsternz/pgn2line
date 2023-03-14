@@ -175,6 +175,14 @@ static void word_search( bool case_insignificant, std::string word, std::string 
 static void remove_tie_breaker_and_dups( std::string fin, std::string fout, bool add_utf8_bom_to_output, std::ofstream *p_smart_uniq, bool no_deduping_at_all=false );
 static void postponed_dedup_filter( bool flush, const std::string &line, std::ofstream &out, std::ofstream *p_smart_uniq );
 
+#ifdef _DEBUG   // for debugging / testing
+#define remove(filename)    do { remove_nulled_out(filename); } while(false)
+void remove_nulled_out( const char *filename )
+{
+    printf( "DEBUG: Temp file %s not removed\n", filename );
+}
+#endif
+
 int main( int argc, const char *argv[] )
 {
     util::tests();
@@ -334,10 +342,10 @@ int main( int argc, const char *argv[] )
     //  yyyy>=year_after && yyyy<=year_before is true
     int year_after=-10000, year_before=10000;
 #ifdef _DEBUG   // for debugging / testing
-    smart_uniq = true;
-    pgn_create_flag = true;
-    list_flag = true;
-    std::string fin("test-in-plus-test-in2.lst");
+    //smart_uniq = true;
+    //pgn_create_flag = true;
+    //list_flag = true;
+    std::string fin("test-in.pgn");
     std::string fout("test-out.lpgn");
 #else
 
@@ -466,7 +474,7 @@ int main( int argc, const char *argv[] )
 */
 
         printf(
-        "pgn2line V3.03 (from Github.com/billforsternz/pgn2line)\n"
+        "pgn2line V3.04 (from Github.com/billforsternz/pgn2line)\n"
         "Convert pgn file(s) to an intermediate format, one line per game, sorted\n"
         "\n"
         "Usage:\n"
@@ -584,7 +592,7 @@ int main( int argc, const char *argv[] )
     std::string temp1_fout = util::sprintf( "%s-temp-filename-pgn2line-presort-%05d.tmp", fout.c_str(), r1 );
     std::string temp2_fout = util::sprintf( "%s-temp-filename-pgn2line-postsort-%05d.tmp", fout.c_str(), r2 );
     ok = false;
-    printf( "pgn2line V3.03 (from Github.com/billforsternz/pgn2line)\n" );
+    printf( "pgn2line V3.04 (from Github.com/billforsternz/pgn2line)\n" );
     bool all_utf8_bom = true;
     if( !list_flag )
     {
@@ -1981,7 +1989,19 @@ static bool refine_sort( std::string fin, std::string fout )
                                 while( main_buffer.size() )
                                 {
                                     std::string l = main_buffer[0];
-                                    if( l.substr(0,7) == old_month.yyyy_mm )
+
+                                    // Bugfix! 2023.03.04. Previously (up to and including V3.03) this
+                                    //  was == rather than >=. Sadly this meant that this loop could
+                                    //  skip right by old months that had games but no new tournaments
+                                    //  and flush newer games to disk before the algorithm had a chance
+                                    //  to do its magic and join those games together with newer
+                                    //  games from the same tournament (games that hadn't even been
+                                    //  read into memory yet). The result was separate clumps of games
+                                    //  from a single tournament rather than all games properly adjacent
+                                    //  This would happen more often if you weren't using massive PGNs
+                                    //  with thousands of tournaments and games, there are more likely
+                                    //  to be months with games but no tournaments in that case.
+                                    if( l.substr(0,7) >= old_month.yyyy_mm )
                                         break;
                                     else
                                     {
