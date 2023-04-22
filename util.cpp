@@ -176,7 +176,7 @@ void split( std::string &s, std::vector<std::string> &fields )
     bool more = true;
     while( more && s.length()>next)
     {
-        size_t offset = s.find('\t',next);
+        size_t offset = s.find(' ',next);
         std::string frag;
         if( offset != std::string::npos )
             frag = s.substr(next,offset-next);
