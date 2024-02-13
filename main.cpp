@@ -740,7 +740,7 @@ public:
     std::string get_yyyy_event_at_site();
     std::string get_prefix(bool reverse_order);
     std::string get_description();
-    int yyyy;
+    int yyyy = 2000;
 private:
     std::string get_event_header();
     std::string get_site_header();

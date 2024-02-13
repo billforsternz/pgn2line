@@ -43,8 +43,8 @@ bool core_pgn2line( std::string fin, std::vector<std::string> &vout )
     bool remove_zero_length = false;
     bool remove_zero_length_allow_bye = false;
     bool remove_unfixed_players_flag = false;
-    int year_before =  1000000;
-    int year_after  = -1000000;
+    int year_before =  INT_MAX;
+    int year_after  =  INT_MIN;
     bool ok = pgn2line( fin, vout,
                     utf8_bom,
                     append,
@@ -464,14 +464,12 @@ static bool pgn2line( std::string fin, std::vector<std::string> &vout,
                     const std::map<std::string,std::string> &fixups,
                     const std::map<std::string,std::string> &name_fixups )
 {
-    fprintf( stderr, "pgn2line() in\n" );
     Game game;
     utf8_bom = false;
     std::ifstream in(fin.c_str());
     if( !in )
     {
-        fprintf( stderr, "Error; Cannot open file %s for reading\n", fin.c_str() );
-        fprintf( stderr, "pgn2line() out - fail\n" );
+        printf( "Error; Cannot open file %s for reading\n", fin.c_str() );
         return false;
     }
     std::ofstream *p_out_diag = NULL;
@@ -635,13 +633,11 @@ static bool pgn2line( std::string fin, std::vector<std::string> &vout,
                 {
                     std::string line_out = game.get_game_as_line(reverse_order);
                     vout.push_back(line_out);
-                    fprintf( stderr, "line_out=%s\n", line_out.c_str() );
                 }
                 break;
             }
         }
     }
-    fprintf( stderr, "pgn2line() out %d lines - success\n", line_number );
     return true;
 }
 
@@ -718,18 +714,15 @@ static void remove_tie_breaker_and_dups( std::string fin, std::string fout, bool
 
 static void line2pgn( std::vector<std::string> &vin, std::string fout )
 {
-    fprintf( stderr, "line2pgn() in\n" );
     Game game;
     std::ofstream out(fout);
-    if( fout!="" && !out )
+    if( !out )
     {
-        fprintf( stderr, "Error; Cannot open file %s for writing\n", fout.c_str() );
-        fprintf( stderr, "line2pgn() out - fail\n" );
+        printf( "Error; Cannot open file %s for writing\n", fout.c_str() );
         return;
     }
     enum {in_prefix1,in_prefix2,in_header1,in_header2,in_moves1,in_moves2,finished} state=in_prefix1, old_state=in_prefix2;
     bool first_line = true;
-    int nbr_lines=0;
     for( std::string line: vin )
     {
         std::string line_out;
@@ -842,44 +835,23 @@ static void line2pgn( std::vector<std::string> &vin, std::string fout )
             {
                 if( finished_header )
                 {
-                    nbr_lines++;
-                    if( fout == "" )
-                        printf( "%s\n", line_out.c_str() );
-                    else
-                        util::putline(out,line_out);
+                    util::putline(out,line_out);
                     line_out.clear();
                     if( state == in_moves1 )
-                    {
-                        nbr_lines++;
-                        if( fout == "" )
-                            printf( "\n" );
-                        else
-                            util::putline(out,"");
-                    }
+                        util::putline(out,"");
                 }
                 if( finished_moves )
                 {
-                    nbr_lines++;
-                    if( fout == "" )
-                        printf( "%s\n", line_out.c_str() );
-                    else
-                        util::putline(out,line_out);
+                    util::putline(out,line_out);
                     line_out.clear();
                     if( state == finished )
-                    {
-                        nbr_lines++;
-                        if( fout == "" )
-                            printf( "\n" );
-                        else
-                            util::putline(out,"");
-                    }
+                        util::putline(out,"");
                 }
             }
             if( c == '\0' )
                 break;
         }
     }
-    fprintf( stderr, "line2pgn() out %d lines - success\n", nbr_lines );
 }
 
 static void tournaments( std::string fin, std::string fout, bool bare )
