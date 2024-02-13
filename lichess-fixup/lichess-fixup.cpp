@@ -50,6 +50,21 @@ struct PlayerResult
     std::string summary;   
 };
 
+static void test_file_creation()
+{
+    fprintf( stderr, "test_file_creation() in\n" );
+    std::ofstream out("testfile.txt");
+    if( !out )
+    {
+        fprintf( stderr, "Error; Cannot open file testfile.txt for writing\n" );
+        fprintf( stderr, "test_file_creation() out - fail\n" );
+        return;
+    }
+    std::string line_out( "This file created to test lichess-fixup.exe" );
+    util::putline(out,line_out);
+    fprintf( stderr, "test_file_creation() out - success - one line file testfile.txt should be present\n" );
+}
+
 int main( int argc, const char **argv )
 {
 #ifdef _DEBUG
@@ -63,14 +78,16 @@ int main( int argc, const char **argv )
     argc = sizeof(args)/sizeof(args[0]);
     argv = args;
 #endif
+    bool stdout_flag=false;
     bool ok = (argc==4);
     if( !ok )
     {
-        printf( 
+        fprintf( stderr,
             "Fix Lichess names and add ratings\n"
             "Usage:\n"
-            "lichess-fixup ratings.txt in.lpgn out.lpgn\n"
-            "ratings.txt format example, (starts with Event, Site)\n"
+            "lichess-fixup [-stdout] ratings.txt in.pgn [out.pgn]\n"
+            "If -stdout flag is applied, omit out.pgn\n"
+            "Format of ratings.txt, by example, (starts with Event, Site)\n"
             "Wellington Open\n"
             "Wellington\n"
             "Dive, Russell   2250\n"
@@ -79,13 +96,28 @@ int main( int argc, const char **argv )
         );
         return -1;
     }
-    std::string fin_ratings(argv[1]);
-    std::string fin(argv[2]);
-    std::string fout(argv[3]);
+    int nbr_flags=0;
+    std::string argv1(argv[1]);
+    test_file_creation();
+    if( argv1 == "-stdout")
+    {
+        nbr_flags++;
+        stdout_flag = true;
+    }
+    std::string fin_ratings(argv[1+nbr_flags]);
+    std::string fin(argv[2+nbr_flags]);
+    std::string fout(stdout_flag?"":argv[3]);
+    std::string upper_fin = util::toupper(fin);
+    std::string upper_fout = util::toupper(fout);
+    if( !stdout_flag && upper_fin==upper_fout )
+    {
+        fprintf( stderr, "Error: Input and output filenames are the same\n");
+        return -1;
+    }
     std::ifstream in_ratings(fin_ratings.c_str());
     if( !in_ratings )
     {
-        printf( "Error; Cannot open file %s for reading\n", fin_ratings.c_str() );
+        fprintf( stderr, "Error; Cannot open file %s for reading\n", fin_ratings.c_str() );
         return -1;
     }
     std::vector<std::string> lpgn_games_in;
@@ -93,8 +125,10 @@ int main( int argc, const char **argv )
     ok = core_pgn2line( fin, lpgn_games_in );
     if( !ok )
         return -1;
+    fprintf( stderr, "lpgn_games_in.size() = %lu\n", lpgn_games_in.size() );
     func_add_ratings( in_ratings, lpgn_games_in, lpgn_games_out );
     core_line2pgn( lpgn_games_out, fout );
+    return 0;
 }
 
 static void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &out )
@@ -137,7 +171,7 @@ static int lichess_moves_to_normal_pgn( const std::string &header, const std::st
     std::string val;
     bool ok = key_find(header,"Result",val);
     if( !ok )
-        printf( "No result(??): %s\n", step1.c_str() );
+        fprintf( stderr, "No result(??): %s\n", step1.c_str() );
     else
     {
         step1 += ' ';
@@ -318,7 +352,7 @@ struct PLAYER
 bool find_player( std::string name, const std::vector<PLAYER> &ratings, PLAYER &rating )
 {
     //if( name == "Leonard McLaren" )
-    //    printf( "Debug!\n" );
+    //    printf( stderr, "Debug!\n" );
     bool found = false;
     std::string orig_name = name;
     util::rtrim(name);
@@ -391,8 +425,8 @@ bool find_player( std::string name, const std::vector<PLAYER> &ratings, PLAYER &
             found = true;
         if( count > 1 )
         {
-            printf( "%s -> %s\n", orig_name.c_str(), rating.name.c_str() );
-            printf( "***** Warning, multiple one token surname only matches, picking first!\n");
+            fprintf( stderr, "%s -> %s\n", orig_name.c_str(), rating.name.c_str() );
+            fprintf( stderr, "***** Warning, multiple one token surname only matches, picking first!\n");
         }
     }
     else
@@ -411,8 +445,8 @@ bool find_player( std::string name, const std::vector<PLAYER> &ratings, PLAYER &
             found = true;
         if( count > 1 )
         {
-            printf( "%s -> %s\n", orig_name.c_str(), rating.name.c_str() );
-            printf( "***** Warning, multiple surname plus forename matches, picking first!\n");
+            fprintf( stderr, "%s -> %s\n", orig_name.c_str(), rating.name.c_str() );
+            fprintf( stderr, "***** Warning, multiple surname plus forename matches, picking first!\n");
         }
         else if( count == 0 )
         {
@@ -430,15 +464,15 @@ bool find_player( std::string name, const std::vector<PLAYER> &ratings, PLAYER &
                 found = true;
             if( count > 1 )
             {
-                printf( "%s -> %s\n", orig_name.c_str(), rating.name.c_str() );
-                printf( "***** Warning, multiple plus first name initial matches, picking first!\n");
+                fprintf( stderr, "%s -> %s\n", orig_name.c_str(), rating.name.c_str() );
+                fprintf( stderr, "***** Warning, multiple plus first name initial matches, picking first!\n");
             }
         }
     }
     if( !found )
     {
-        printf( "%s\n", orig_name.c_str() );
-        printf( "***** Not found!\n");
+        fprintf( stderr, "%s\n", orig_name.c_str() );
+        fprintf( stderr, "***** Not found!\n");
     }
     return found;
 }
@@ -541,17 +575,24 @@ void key_update( std::string &header, const std::string key, const std::string k
 
 static int func_add_ratings( std::ifstream &in1, std::vector<std::string> &in2, std::vector<std::string> &out )
 {
+    fprintf( stderr, "func_add_ratings() in\n" );
     // Read the input and fix it
     std::string line;
     if( !std::getline(in1, line) )
+    {
+        fprintf( stderr, "func_add_ratings() out - fail\n" );
         return(-1);
+    }
 
     // Strip out UTF8 BOM mark (hex value: EF BB BF)
     if( line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
         line = line.substr(3);
     std::string event_val = line;
     if( !std::getline(in1, line) )
+    {
+        fprintf( stderr, "func_add_ratings() out - fail2\n" );
         return(-1);
+    }
     std::string site_val = line;
 
     // Read the ratings
@@ -586,16 +627,29 @@ static int func_add_ratings( std::ifstream &in1, std::vector<std::string> &in2, 
             }        
         }
     }
+    for( PLAYER &player: ratings )
+    {
+        fprintf( stderr, "Player name=%s, surname=%s, forename=%s, rating=%s\n",
+            player.name.c_str(),
+            player.surname.c_str(),
+            player.forename.c_str(),
+            player.rating.c_str() );
+    }
 
     // Fix line by line
+    int nbr_lines=0;
     for( std::string line: in2 )
     {
+        nbr_lines++;
         util::rtrim(line);
+        fprintf( stderr, "line=%s\n", line.c_str() );
         auto offset = line.find("@M");
         if( offset == std::string::npos )
             continue;
         std::string header = line.substr(0,offset);
         std::string moves  = line.substr(offset);
+        fprintf( stderr, "header=%s\n", header.c_str() );
+        fprintf( stderr, "moves=%s\n", moves.c_str() );
         std::string date;
         bool ok = key_find( header, "UTCDate", date );
         if( ok )
@@ -651,10 +705,11 @@ static int func_add_ratings( std::ifstream &in1, std::vector<std::string> &in2, 
         int mask = lichess_moves_to_normal_pgn( header, moves, normal, nbr_comments );
         if( (mask & GET_MAIN_LINE_MASK_HAS_COMMENTS) && !(mask & GET_MAIN_LINE_MASK_ALL_COMMENTS_AUTO) )
         {
-            printf( "Warning: removing one or more not automated comments\n");
+            fprintf( stderr, "Warning: removing one or more not automated comments\n");
         }
         out.push_back(header+normal);
     }
+    fprintf( stderr, "func_add_ratings() out %d lines - success\n", nbr_lines );
     return 0;
 }
 
