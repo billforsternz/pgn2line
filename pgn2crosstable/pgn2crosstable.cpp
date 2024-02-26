@@ -223,6 +223,8 @@ std::map<std::string,int> tiebreaks;
 
 static int func_gen_crosstable( std::vector<std::string> &in, FILE *fout,  std::vector<std::string> &s_tiebreaks )
 {
+    int final_round=2;
+
     // Map player -> tiebreak, best tiebreak = -1, worst = INT_MIN
     int line_nbr=1;
     for( std::string &player: s_tiebreaks )
@@ -266,6 +268,8 @@ static int func_gen_crosstable( std::vector<std::string> &in, FILE *fout,  std::
                 round_illformed++;
             if( iround > MAX_ROUND )
                 round_toobig++;
+            else if( iround > final_round )
+                final_round = iround;
         }
         else
             misses_round++;
@@ -406,7 +410,7 @@ static int func_gen_crosstable( std::vector<std::string> &in, FILE *fout,  std::
         std::string name = player.player;
         name = name.substr(0,28);
         fprintf( fout, "%-3d %-28s %4s  %.1f : ", player.place, name.c_str(), player.elo.c_str(), player.total/2.0 );
-        for( int round=1; round<=11; round++ )
+        for( int round=1; round<=final_round; round++ )
         {
             RESULT &r = player.results[round];
             std::string name = player.player;
