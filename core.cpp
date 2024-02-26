@@ -14,8 +14,8 @@
 #include <map>
 #include <set>
 #include <algorithm>
-#include "../disksort.h"
-#include "../util.h"
+#include "disksort.h"
+#include "util.h"
 
 static bool pgn2line( std::string fin, std::vector<std::string> &vout,
                     bool &utf8_bom,
