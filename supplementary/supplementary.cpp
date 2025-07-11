@@ -1,6 +1,39 @@
 // supplementary.cpp : Do something special to LPGN file
 //
 
+/*
+
+Some recent stuff
+    z = collect_fide_id
+        fin1, fin2, fout
+        fin1 = list of nzl fide ids
+        fin2 = input .lpgn
+        fout = output .lpgn NZL player games with names modified with " #NZ#"
+    lbi = lichess broadcast improve
+        fin, fout
+        fin  = input .lpgn
+        fout = output .lpgn Improvements, eg create Event and Date fields if absent
+    gf = get_name_fide_id
+        fin, fout
+        fin = input .lpgn
+        fout = ordered list of all FIDE id, name pairs from games file
+    pf = put_name_fide_id
+        fin1, fin2, fout
+        fin1 = list of all FIDE id, name pairs
+        fin2 = input .lpgn
+        fout = output .lpgn If FIDE id found in list, replace player name with name from list (with special Gino patch)
+    nzcf_game_id
+        fin, fout
+        fin = input .lpgn
+        fout = output .lpgn all games assigned a unique, incrementing NzcfGameId 
+    improve (a bit weird this one)
+        fin1, fin2, fout
+        fin1 = input .lpgn changed / improved games only
+        fin2 = input .lpgn
+        fout = output .lpgn input .lpgn with original games replaced by improved games (based on matching "Round" tag - so all games in one tournament right?
+*/
+
+
 
 // To download games eg https://lichess.org/api/tournament/PmNmfo9m/games
 
@@ -16,8 +49,14 @@
 #include "..\util.h"
 #include "..\thc.h"
 
+static int func_collect_fide_id( std::ifstream &in1, std::ifstream &in2, std::ofstream &out );
+static int func_tabiya( std::ifstream &in, std::ofstream &out );
+static int func_put_name_fide_id( std::ifstream &in1, std::ifstream &in2, std::ofstream &out );
+static int func_get_name_fide_id( std::ifstream &in, std::ofstream &out );
+static int func_lichess_broadcast_improve( std::ifstream &in, std::ofstream &out );
 static int pluck( std::ifstream &in1, std::ifstream &in2, std::ofstream &out, bool reorder );
 static int func_justify( std::ifstream &in1, std::ofstream &out );
+static int func_nzcf_game_id( std::ifstream &in, std::ofstream &out );
 static int func_remove_auto_commentary( std::ifstream &in1, std::ofstream &out );
 static int func_add_ratings( std::ifstream &in1, std::ifstream &in2, std::ofstream &out );
 static int func_bulk_out_skeleton( std::ifstream &in_bulk, std::ifstream &in_skeleton, std::ofstream &out );
@@ -101,7 +140,7 @@ int main( int argc, const char **argv )
         "C:/Users/Bill/Documents/ChessDatabase/nz-database/work-2023/refine-2022/old1-rejustified.lpgn"
     };
 #endif
-#if 1
+#if 0
     const char *args[] =
     {
         "dont-care.exe",
@@ -109,6 +148,26 @@ int main( int argc, const char **argv )
         "C:/Users/Bill/Documents/Chess/congress/nzchamps.txt",
         "C:/Users/Bill/Documents/Chess/congress/boards-11-24.lpgn",
         "C:/Users/Bill/Documents/Chess/congress/boards-11-24-out2.lpgn"
+    };
+#endif
+#if 0
+    const char *args[] =
+    {
+        "dont-care.exe",
+        "z",
+        "C:/Users/Bill/Documents/Chess/twic/fide-ids-sorted.txt",
+        "C:/Users/Bill/Documents/Chess/twic/twic-400-1542.lpgn",
+        "C:/Users/Bill/Documents/Chess/twic/nz.lpgn"
+    };
+#endif
+
+#if 0
+    const char *args[] =
+    {
+        "dont-care.exe",
+        "y",
+        "C:/Users/Bill/Documents/Chess/twic/twic-400-1542.lpgn",
+        "C:/Users/Bill/Documents/Chess/twic/tabiyas.lpgn"
     };
 #endif
 
@@ -127,7 +186,10 @@ int main( int argc, const char **argv )
 #endif
 
 
-    enum {time,event,teams,hardwired,pluck_games,pluck_games_reorder,refine_dups,remove_exact_pairs,golden,add_ratings,bulk_out_skeleton,remove_auto_commentary,justify,improve} purpose=time;
+    enum {time,event,teams,hardwired,pluck_games,pluck_games_reorder,refine_dups,
+          remove_exact_pairs,golden,get_name_fide_id,lichess_broadcast_improve,put_name_fide_id,tabiya,collect_fide_id,
+          add_ratings,bulk_out_skeleton,remove_auto_commentary,nzcf_game_id,
+          justify,improve} purpose=time;
     bool ok = (argc>2);
     if( ok )
     {
@@ -182,6 +244,31 @@ int main( int argc, const char **argv )
             ok = (argc==5);
             purpose = add_ratings;
         }
+        else if( s == "y" )
+        {
+            ok = (argc==4);
+            purpose = tabiya;
+        } 
+        else if( s == "z" )
+        {
+            ok = (argc==5);
+            purpose = collect_fide_id;
+        } 
+        else if( s == "gf" )
+        {
+            ok = (argc==4);
+            purpose = get_name_fide_id;
+        }
+        else if( s == "lbi" )
+        {
+            ok = (argc==4);
+            purpose = lichess_broadcast_improve;
+        }
+        else if( s == "pf" )
+        {
+            ok = (argc==5);
+            purpose = put_name_fide_id;
+        }
         else if( s == "s" )
         {
             ok = (argc==5);
@@ -197,6 +284,11 @@ int main( int argc, const char **argv )
             ok = (argc==4);
             purpose = justify;
         }
+        else if( s == "n" )
+        {
+            ok = (argc==4);
+            purpose = nzcf_game_id;
+        }
         else if( s == "i" )
         {
             ok = (argc==5);
@@ -207,7 +299,12 @@ int main( int argc, const char **argv )
     {
         printf( 
             "Usage:\n"
+            "n in.lpgn out.lpgn                     ;Add nzcf game ids\n"
+            "z nz-fide-ids.txt in.lpgn out.lpgn     ;Collect games with NZ players\n"
             "r ratings.txt in.lpgn out.lpgn         ;Fix Lichess names and add ratings\n"
+            "y in.lpgn out.lpgn                     ;Find Tabiyas in file\n"
+            "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file\n"
+            "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file\n"
             "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton\n"
             "i bulk.lpgn improve.lpgn out.lpgn      ;Replace bulk games with improved game\n"
             "k in.lpgn out.lpgn                     ;Remove auto generated comments\n"
@@ -226,7 +323,7 @@ int main( int argc, const char **argv )
         return -1;
     }
     std::string fin(argv[2]);
-    std::string fout(argv[(purpose==pluck_games||purpose==pluck_games_reorder||purpose==add_ratings||purpose==bulk_out_skeleton||purpose==improve)?4:3]);
+    std::string fout(argv[(purpose==pluck_games||purpose==pluck_games_reorder||purpose==add_ratings||purpose==put_name_fide_id||purpose==collect_fide_id||purpose==bulk_out_skeleton||purpose==improve)?4:3]);
     std::ifstream in(fin.c_str());
     if( !in )
     {
@@ -247,6 +344,8 @@ int main( int argc, const char **argv )
         return func_remove_auto_commentary( in, out );
     else if( purpose == justify )
         return func_justify( in, out );
+    else if( purpose == nzcf_game_id )
+        return func_nzcf_game_id( in, out );
     else if( purpose == refine_dups )
         return do_refine_dups( in, out );
     else if( purpose == remove_exact_pairs )
@@ -294,6 +393,40 @@ int main( int argc, const char **argv )
             return -1;
         }
         return func_add_ratings( in, in2,  out );
+    }
+    else if( purpose == collect_fide_id )
+    {
+        std::string fin2(argv[3]);
+        std::ifstream in2(fin2.c_str());
+        if( !in2 )
+        {
+            printf( "Error; Cannot open file %s for reading\n", fin2.c_str() );
+            return -1;
+        }
+        return func_collect_fide_id( in, in2,  out );
+    }
+    else if( purpose == put_name_fide_id )
+    {
+        std::string fin2(argv[3]);
+        std::ifstream in2(fin2.c_str());
+        if( !in2 )
+        {
+            printf( "Error; Cannot open file %s for reading\n", fin2.c_str() );
+            return -1;
+        }
+        return func_put_name_fide_id( in, in2,  out );
+    }
+    else if( purpose == get_name_fide_id )
+    {
+        return func_get_name_fide_id( in, out );
+    }
+    else if( purpose == lichess_broadcast_improve )
+    {
+        return func_lichess_broadcast_improve( in, out );
+    }
+    else if( purpose == tabiya )
+    {
+        return func_tabiya( in, out );
     }
     else if( purpose == event )
         replace_event = argv[4];
@@ -549,7 +682,7 @@ int main( int argc, const char **argv )
             {
                 if( std::string::npos!=line.find("@H[Termination \"Time forfeit\"]") )
                 {
-                    unsigned int len = line.length();
+                    size_t len = line.length();
                     if( util::suffix(line,"1-0") )
                     {
                         line = line.substr(0,len-3);
@@ -657,7 +790,7 @@ int main( int argc, const char **argv )
         printf( "** The initial set of players established\n" );
         std::map<std::string,int> player_nbr;
         int idx = 0;
-        int nbr_players = players.size();
+        int nbr_players = (int)players.size();
         for( std::string player: players )
         {
             player_set.insert( player ) ;
@@ -895,6 +1028,7 @@ static void convert_moves( const std::vector<std::string> &in, std::vector<thc::
         thc::Move m;
         m.NaturalInFast( &cr, s.c_str() );
         out.push_back(m);
+        cr.PlayMove(m);
     }
 }
 
@@ -1576,7 +1710,7 @@ static int func_bulk_out_skeleton( std::ifstream &in_bulk, std::ifstream &in_ske
             util::putline( out, skeleton.header+bulk.moves );
         }
     }
-    printf( "%u successes from %u attempts\n", successes, skeleton_v.size() );
+    printf( "%u successes from %zu attempts\n", successes, skeleton_v.size() );
     return 0;
 }
 
@@ -1618,6 +1752,89 @@ static int func_remove_auto_commentary( std::ifstream &in1, std::ofstream &out )
         }
     }
     printf( "Normalised %u games (apparently with only automated comments) from %u total games\n", fixed_lines, total_lines );
+    return 0;
+}
+
+static int func_nzcf_game_id( std::ifstream &in, std::ofstream &out )
+{
+    printf( "Pass 1: Find the maximum existing NzcfGameId\n" );
+    int line_nbr=0;
+    long max_so_far=0;
+    bool at_least_one_missing = false;
+    bool at_least_one_found = false;
+    for(;;)
+    {
+        std::string line;
+        if( !std::getline(in, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        auto offset = line.find("@M");
+        if( offset == std::string::npos )
+            continue;
+        std::string header = line.substr(0,offset);
+        std::string game_id;
+        bool found = key_find(header,"NzcfGameId",game_id);
+        if( !found )
+        {
+            at_least_one_missing = true;
+        }
+        else
+        {
+            at_least_one_found = true;
+            long id = atol(game_id.c_str());
+            if( id>0 && id>max_so_far )
+                max_so_far = id;
+        }
+    }
+    if( !at_least_one_missing )
+    {
+        printf( "All games have NzcfGameId tags, no insertions required\n" );
+        return 0;
+    }
+    if( !at_least_one_found )
+    {
+        printf( "No existing NzcfGameId tags found, all games will be assigned ids starting at 1\n" );
+        printf( "Pass 2: Insert incrementing NzcfGameId tags for all games\n" );
+    }
+    else
+    {
+        printf( "Highest existing NzcfGameId is %ld, new ids will be assigned starting at %ld\n",
+                    max_so_far, max_so_far+1 );
+        printf( "Pass 2: Insert incrementing NzcfGameId tags for games that don't have them\n" );
+    }
+    in.clear();
+    in.seekg(0);
+    line_nbr=0;
+    for(;;)
+    {
+        std::string line;
+        if( !std::getline(in, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        auto offset = line.find("@M");
+        if( offset == std::string::npos )
+            continue;
+        std::string header = line.substr(0,offset);
+        std::string moves  = line.substr(offset);
+        std::string game_id;
+        bool found = key_find(header,"NzcfGameId",game_id);
+        if( !found )
+        {
+            game_id = util::sprintf("%ld",++max_so_far);
+            key_add(header,"NzcfGameId",game_id);
+        }
+        util::putline(out,header+moves);       
+    }
     return 0;
 }
 
@@ -1768,7 +1985,6 @@ static int func_improve( std::ifstream &in_bulk, std::ifstream &in_improve, std:
     printf( "%u successes from %u attempts\n", successes, attempts );
     return 0;
 }
-
 
 //#define TRIGGER "2014-06-29 9th Wroclaw Open 2014, Wroclaw POL # 2014-06-29 001.026 Dzikowski-Dadello"
 static int pluck( std::ifstream &in1, std::ifstream &in2, std::ofstream &out, bool reorder )
@@ -2061,6 +2277,668 @@ static int do_remove_exact_pairs( std::ifstream &in, std::ofstream &out )
             previous = line;
         even = !even;
     } 
+    return 0;
+}
+
+//
+//  Find NZ Players
+//
+static int func_collect_fide_id( std::ifstream &in1, std::ifstream &in2, std::ofstream &out )
+{
+    std::set<long> nz_fide_ids;
+    std::string line;
+    int line_nbr=0;
+    unsigned int nbr_games_found=0;
+
+    // Read the NZ fide ids
+    for(;;)
+    {
+        if( !std::getline(in1, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        long id = atol(line.c_str());
+        if( id > 0 )
+            nz_fide_ids.insert(id);
+    }
+
+    printf( "%zu NZ fide ids read from file\n", nz_fide_ids.size() );
+
+    // Filter line by line
+    line_nbr=0;
+    for(;;)
+    {
+        if( !std::getline(in2, line) )
+            break;
+        int nbr_nz_players = 0;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        auto offset = line.find("@M");
+        if( offset == std::string::npos )
+            continue;
+        std::string header = line.substr(0,offset);
+        std::string moves  = line.substr(offset);
+        std::string white_fide_id;
+        std::string black_fide_id;
+        bool ok  = key_find( header, "WhiteFideId", white_fide_id );
+        if( ok )
+        {
+            long id = atol(white_fide_id.c_str());
+            auto it = nz_fide_ids.find(id);
+            if( it != nz_fide_ids.end() )
+            {
+                nbr_nz_players++;
+                std::string name;
+                ok = key_find( header, "White", name );
+                if( ok )
+                    key_replace( header, "White", name + " #NZ#"  );
+            }
+        }
+        ok  = key_find( header, "BlackFideId", black_fide_id );
+        if( ok )
+        {
+            long id = atol(black_fide_id.c_str());
+            auto it = nz_fide_ids.find(id);
+            if( it != nz_fide_ids.end() )
+            {
+                nbr_nz_players++;
+                std::string name;
+                ok = key_find( header, "Black", name );
+                if( ok )
+                    key_replace( header, "Black", name + " #NZ#"  );
+            }
+        }
+        if( nbr_nz_players > 0 )
+        {
+            nbr_games_found++;
+            util::putline(out,header+moves);
+        }
+    }
+    printf( "%u games found\n", nbr_games_found );
+    return 0;
+}
+
+
+bool predicate_lt( const std::pair<long,std::string> &left,  const std::pair<long,std::string> &right )
+{
+    return left.first < right.first;
+}
+
+
+struct Tabiya
+{
+    bool skip=false;        // skip over this one
+    bool both=false;        // best in both nbr and proportion
+    bool absolute=false;    // best in nbr
+    bool white=true;
+    int nbr_ply=0;
+    int nbr_player_games=0;
+    std::string squares;
+    std::string fide_id;
+    int nbr_hits;
+    double proportion_hits;
+};
+
+
+//
+//  Find some good Tabiyas
+//
+#define TABIYA_PLY 16
+#define CUTOFF 10
+#define PLAYER_MIN_GAMES 20
+static void func_tabiya_make_maps
+(
+    std::ifstream &in, 
+    std::map<std::string,std::vector<std::string>> &white_games,
+    std::map<std::string,std::vector<std::string>> &black_games
+);
+static void func_tabiya_body
+(
+    std::ofstream &out,
+    std::map<std::string,std::vector<std::string>> &games,
+    bool white, int nbr_ply
+);
+static int func_tabiya( std::ifstream &in, std::ofstream &out )
+{
+    std::map<std::string,std::vector<std::string>> white_games;
+    std::map<std::string,std::vector<std::string>> black_games;
+    func_tabiya_make_maps(in,white_games,black_games);
+    func_tabiya_body(out,white_games,true,TABIYA_PLY);
+    func_tabiya_body(out,black_games,false,TABIYA_PLY);
+    return 0;
+}
+
+static void func_tabiya_make_maps
+(
+    std::ifstream &in, 
+    std::map<std::string,std::vector<std::string>> &white_games,
+    std::map<std::string,std::vector<std::string>> &black_games
+)
+{
+    std::vector<Tabiya> best_tabiyas_nbr;
+    std::vector<Tabiya> best_tabiyas_proportion;
+    std::string line;
+    int line_nbr=0;
+    int nbr_white_players=0, nbr_black_players=0;
+
+    // Build maps of (vector of games) for each player
+    printf( "Begin reading input file, make White and Black maps of games for each player\n");
+    line_nbr=0;
+    for(;;)
+    {
+        if( !std::getline(in, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        if( line_nbr%10000 == 0 )
+            printf( "%d lines\n", line_nbr );
+        util::rtrim(line);
+        auto offset = line.find("@M");
+        if( offset == std::string::npos )
+            continue;
+        std::string header = line.substr(0,offset);
+        std::string white_fide_id;
+
+#ifdef TEMP_DONT_HAVE_FIDE_ID
+        bool ok  = key_find( header, "White", white_fide_id );
+#else
+        bool ok  = key_find( header, "WhiteFideId", white_fide_id );
+#endif
+        if( ok )
+        {
+            auto it = white_games.find(white_fide_id);
+            if( it != white_games.end() )
+            {
+                std::vector<std::string> &games = it->second;
+                games.push_back(line);
+            }
+            else
+            {
+                std::vector<std::string> games;
+                games.push_back(line);
+                white_games[white_fide_id] = games;
+                nbr_white_players++;
+            }
+        }
+        std::string black_fide_id;
+#ifdef TEMP_DONT_HAVE_FIDE_ID
+        ok = key_find( header, "Black", black_fide_id );
+#else
+        ok = key_find( header, "BlackFideId", black_fide_id );
+#endif
+        if( ok )
+        {
+            auto it = black_games.find(black_fide_id);
+            if( it != black_games.end() )
+            {
+                std::vector<std::string> &games = it->second;
+                games.push_back(line);
+            }
+            else
+            {
+                std::vector<std::string> games;
+                games.push_back(line);
+                black_games[black_fide_id] = games;
+                nbr_black_players++;
+            }
+        }
+    }
+    printf( "End reading input file %d white players, %d black players, %d lines\n", nbr_white_players, nbr_black_players, line_nbr );
+}
+
+bool lt_nbr_hits( const Tabiya &left, const Tabiya &right )
+{
+    return left.nbr_hits < right.nbr_hits;
+}
+
+bool lt_proportion_hits( const Tabiya &left, const Tabiya &right )
+{
+    return left.proportion_hits < right.proportion_hits;
+}
+
+static void func_tabiya_body
+(
+    std::ofstream &out,
+    std::map<std::string,std::vector<std::string>> &games,
+    bool white, int nbr_ply
+)
+{
+    printf( "Look for %s Tabiyas after %d ply\n", white?"White":"Black", nbr_ply );
+    std::vector<Tabiya> best_tabiyas_nbr;
+    std::vector<Tabiya> best_tabiyas_proportion;
+    int nbr_players = 0;
+
+    // For each player in turn
+    for( const std::pair<std::string,std::vector<std::string>> &player: games )
+    {
+        size_t nbr_of_games = player.second.size();
+        nbr_players++;
+        if( nbr_players%100 == 0)
+            printf( "%d players\n", nbr_players );
+        if( nbr_of_games < PLAYER_MIN_GAMES )
+            continue;
+
+        // Build a vector of positions after nbr_ply half moves
+        std::vector<std::string> positions;
+        for( const std::string &line: player.second )
+        {
+            std::vector<std::string> main_line;
+            int nbr_comments;
+            std::string moves_txt;
+            get_main_line( line, main_line, moves_txt, nbr_comments );
+            std::vector<thc::Move> moves;
+            convert_moves( main_line, moves );
+            thc::ChessRules cr;
+            int count = 0;
+            for( thc::Move mv: moves )
+            {
+                cr.PlayMove( mv );
+                if( ++count == nbr_ply )
+                {
+                    positions.push_back(cr.squares);
+                    break;
+                }
+            }
+        }
+
+        // Look for multiple instances of one position
+        std::sort( positions.begin(), positions.end() );
+        int in_a_row = 0;
+        int max_so_far = 0;
+        std::string best_so_far;
+        std::string previous;
+        for( const std::string &pos: positions )
+        {
+            if( in_a_row == 0 )
+            {
+                previous = pos;
+                in_a_row = 1;
+            }
+            else
+            {
+                if( previous == pos )
+                    in_a_row++;
+                else
+                {
+                    if( in_a_row >= max_so_far )
+                    {
+                        max_so_far = in_a_row;
+                        best_so_far = previous;
+                    }
+                    previous = pos;
+                    in_a_row = 1;
+                }
+            }
+        }
+        if( max_so_far < 2 )
+            continue;
+
+        // We now have the "best" (most frequent) position for this player
+        //  is it good enough to be a tabiya ?
+        double proportion = ( (double)(max_so_far) / (double)(nbr_of_games?nbr_of_games:1) );
+        Tabiya tabiya;
+        tabiya.fide_id = player.first;
+        tabiya.nbr_hits = max_so_far;
+        tabiya.proportion_hits = proportion;
+        tabiya.nbr_player_games = (int)nbr_of_games;
+        tabiya.squares = best_so_far;
+        tabiya.white = white;
+        if( best_tabiyas_nbr.size() < CUTOFF )
+            best_tabiyas_nbr.push_back(tabiya);
+        else
+        {
+            std::sort( best_tabiyas_nbr.begin(),  best_tabiyas_nbr.end(), lt_nbr_hits );
+            if( max_so_far > best_tabiyas_nbr[0].nbr_hits )
+                best_tabiyas_nbr[0] = tabiya;
+        }
+        if( best_tabiyas_proportion.size() < CUTOFF )
+            best_tabiyas_proportion.push_back(tabiya);
+        else
+        {
+            std::sort( best_tabiyas_proportion.begin(),  best_tabiyas_proportion.end(), lt_proportion_hits );
+            if( proportion > best_tabiyas_proportion[0].proportion_hits )
+                best_tabiyas_proportion[0] = tabiya;
+        }
+    }
+    printf( "%d players\n", nbr_players );
+
+    // Merge the two sets of Tabiyas
+    std::vector<Tabiya> merged;
+    for( Tabiya &t1: best_tabiyas_nbr )
+    {
+        t1.absolute = true;
+        if( t1.nbr_hits == 0 )
+            continue;
+        for( Tabiya &t2: best_tabiyas_proportion )
+        {
+            if( t1.fide_id==t2.fide_id && t1.squares==t2.squares )
+            {
+                t1.both = true;
+                t2.skip = true;
+            }
+        }
+        merged.push_back(t1);
+    }
+    for( Tabiya &t2: best_tabiyas_proportion )
+    {
+        t2.absolute = false;
+        if( t2.nbr_hits == 0 )
+            continue;
+        if( !t2.skip )
+            merged.push_back(t2);
+    }
+
+    // For each Tabiya
+    for( const Tabiya &tabiya: merged )
+    {
+
+        const std::string first_game = games[tabiya.fide_id][0];
+        std::string name("?");
+        key_find( first_game, tabiya.white?"White":"Black", name );
+        std::string desc = util::sprintf( "Player %s, fide_id=%s, %s, %d games = %.2f%% percent of total=%d",
+            name.c_str(),
+            tabiya.fide_id.c_str(),
+            tabiya.white ? "White" : "Black",
+            tabiya.nbr_hits,
+            tabiya.proportion_hits * 100.0,
+            tabiya.nbr_player_games
+        );
+        if( tabiya.both )
+            desc += " (high in absolute and relative terms)";
+        else
+            desc += (tabiya.absolute ? " (high in absolute terms)" : " (high in relative terms)");
+        desc += util::sprintf( ", position after %d ply =\n", tabiya.nbr_ply );
+        char buf[100];
+        char *dst = buf;
+        const char *src = tabiya.squares.c_str();
+        for( int rank=0; rank<8; rank++ )
+        {
+            for( int file=0; file<8; file++ )
+            {
+                char c = *src++;
+                *dst++ = (c==' '?'.':c);
+            }
+            *dst++ = '\n';
+        }
+        *dst++ = '\0';
+        desc += buf; 
+        printf( "%s\n", desc.c_str() );
+
+        // For each of the players games, see if it reaches the Tabiya
+        for( const std::string game: games[tabiya.fide_id] )
+        {
+            
+            std::vector<std::string> main_line;
+            int nbr_comments;
+            std::string moves_txt;
+            get_main_line( game, main_line, moves_txt, nbr_comments );
+            std::vector<thc::Move> moves;
+            convert_moves( main_line, moves );
+            thc::ChessRules cr;
+            int count = 0;
+            for( thc::Move mv: moves )
+            {
+                cr.PlayMove( mv );
+                if( ++count == nbr_ply )
+                {
+                    if( cr.squares == tabiya.squares )
+                    {
+                        // If it does, add it to output
+                        util::putline(out,game);
+                    }
+                    break;
+                }
+            }
+        }
+
+    }
+}
+
+/*
+    If Event starts with "Round " copy BroadcastName -> Event
+    If Date absent, create Date after Site using UTCDate
+*/
+static int func_lichess_broadcast_improve( std::ifstream &in, std::ofstream &out )
+{
+    std::string line;
+    int line_nbr=0;
+    line_nbr=0;
+    for(;;)
+    {
+        if( !std::getline(in, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        auto offset = line.find("@M");
+        if( offset == std::string::npos )
+            continue;
+        std::string header = line.substr(0,offset);
+        std::string moves  = line.substr(offset);
+        std::string event;
+        std::string name;
+        bool ok  = key_find( header, "Event", event );
+        bool ok2 = key_find( header, "BroadcastName", name );
+        if( ok && ok2 && util::prefix(event,"Round ") )
+        {
+            key_replace(header,"Event",name);
+        }
+        std::string date;
+        std::string utc_date;
+        ok  = key_find( header, "Date", date );
+        ok2 = key_find( header, "UTCDate", utc_date );
+        if( !ok && ok2 )
+        {
+            key_update(header,"Date","Site",utc_date);
+        }
+        util::putline(out,header+moves);
+    }
+    return 0;
+}
+
+static int func_get_name_fide_id( std::ifstream &in, std::ofstream &out )
+{
+    std::map<long,std::string> id_names;
+    std::string line;
+    int line_nbr=0;
+
+    // Find names line by line
+    line_nbr=0;
+    unsigned int nbr_names_replaced = 0;
+    for(;;)
+    {
+        if( !std::getline(in, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        auto offset = line.find("@M");
+        if( offset == std::string::npos )
+            continue;
+        std::string header = line.substr(0,offset);
+        std::string moves  = line.substr(offset);
+        std::string white_fide_id;
+        std::string black_fide_id;
+        bool ok  = key_find( header, "WhiteFideId", white_fide_id );
+        std::string name;
+        bool ok2 = key_find( header, "White", name );
+        if( ok && ok2 )
+        {
+            long id = atol(white_fide_id.c_str());
+            if( id == 4300963 )
+                name = "Stark, John";
+            if( id == 4314565 )
+                name = "van der Hoorn, Thomas";
+            if( id != 0 )
+            {
+                auto it = id_names.find(id);
+                if( it == id_names.end() )
+                    id_names[id] = name;
+                else
+                {
+                    if( it->second != name )
+                        printf( "Warning %ld->%s and %s (keep first)\n", id, it->second.c_str(), name.c_str() );
+                }
+            }
+        }
+        ok  = key_find( header, "BlackFideId", black_fide_id );
+        ok2 = key_find( header, "Black", name );
+        if( ok && ok2 )
+        {
+            long id = atol(black_fide_id.c_str());
+            if( id == 4300963 )
+                name = "Stark, John";
+            if( id == 4314565 )
+                name = "van der Hoorn, Thomas";
+            if( id != 0 )
+            {
+                auto it = id_names.find(id);
+                if( it == id_names.end() )
+                    id_names[id] = name;
+                else
+                {
+                    if( it->second != name )
+                        printf( "Warning %ld->%s and %s (keep first)\n", id, it->second.c_str(), name.c_str() );
+                }
+            }
+        }
+    }
+    printf( "%zu id name pairs harvested, writing to file\n", id_names.size() );
+    std::vector<std::pair<long,std::string>> v;
+    for( std::pair<long,std::string> pr: id_names )
+        v.push_back(pr);
+    std::sort( v.begin(), v.end(), predicate_lt );
+    for( std::pair<long,std::string> pr: v )
+    {
+        std::string line = util::sprintf( "%ld %s", pr.first, pr.second.c_str() );
+        util::putline(out,line);
+    }
+    return 0;
+}
+
+static int func_put_name_fide_id( std::ifstream &in1, std::ifstream &in2, std::ofstream &out )
+{
+    std::map<long,std::string> id_names;
+    std::string line;
+    int line_nbr=0;
+
+    // Read id -> player file
+    for(;;)
+    {
+        if( !std::getline(in1, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        const char *s = line.c_str();
+        long id = atol(s);
+        if( id > 0 )
+        {
+            while( '0'<=*s && *s<='9' )
+                s++;
+            while( ' '==*s || *s=='\t' )
+                s++;
+            if( *s )
+            {
+                std::string name(s);
+                auto it = id_names.find(id);
+                if( it == id_names.end() )
+                    id_names[id] = name;
+                else
+                {
+                    if( it->second != name )
+                        printf( "Warning %ld->%s and %s (keep first)\n", id, it->second.c_str(), name.c_str() );
+                }
+            }
+        }
+    }
+    printf( "%zu fide ids, name pairs read from file\n", id_names.size() );
+
+    // Filter line by line
+    line_nbr=0;
+    unsigned int nbr_names_replaced = 0;
+    for(;;)
+    {
+        if( !std::getline(in2, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        auto offset = line.find("@M");
+        if( offset == std::string::npos )
+            continue;
+        std::string header = line.substr(0,offset);
+        std::string moves  = line.substr(offset);
+        std::string white_fide_id;
+        std::string black_fide_id;
+        bool ok  = key_find( header, "WhiteFideId", white_fide_id );
+        if( ok )
+        {
+            long id = atol(white_fide_id.c_str());
+            auto it = id_names.find(id);
+            if( it != id_names.end() )
+            {
+                std::string name;
+                ok = key_find( header, "White", name );
+                if( ok )
+                {
+                    if( id==4300963 && name.length()>=9 && name.substr(0,9)=="Thornton," )
+                        printf("Special patch to avoid renaming Gino in old games\n");
+                    else
+                    {
+                        nbr_names_replaced++;
+                        key_replace( header, "White", it->second  );
+                    }
+                }
+            }
+        }
+        ok  = key_find( header, "BlackFideId", black_fide_id );
+        if( ok )
+        {
+            long id = atol(black_fide_id.c_str());
+            auto it = id_names.find(id);
+            if( it != id_names.end() )
+            {
+                std::string name;
+                ok = key_find( header, "Black", name );
+                if( ok )
+                {
+                    if( id==4300963 && name.length()>=9 && name.substr(0,9)=="Thornton," )
+                        printf("Special patch to avoid renaming Gino in old games\n");
+                    else
+                    {
+                        nbr_names_replaced++;
+                        key_replace( header, "Black", it->second );
+                    }
+                }
+            }
+        }
+        util::putline(out,header+moves);
+    }
+    printf( "%u names replaced (hopefully improved)\n", nbr_names_replaced );
     return 0;
 }
 
