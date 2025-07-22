@@ -1418,6 +1418,146 @@ int cmd_get_name_fide_id( std::ifstream &in, std::ofstream &out )
     return 0;
 }
 
+struct PlayerDetails
+{
+    std::string name;
+    long id  = 0;
+    int  nbr_games=0;
+    int  nbr_games_with_id=0;
+    int  nbr_games_with_other_ids=0;
+    int  first_year=0;
+    int  last_year=0;
+    std::set<long> other_ids;
+    bool operator < (const PlayerDetails &lhs ) { return nbr_games < lhs.nbr_games; }
+};
+
+int cmd_get_name_fide_id_plus( std::ifstream &in, std::ofstream &out )
+{
+    std::map<std::string,PlayerDetails> players;
+    std::string line;
+    int line_nbr=0;
+
+    // Find names line by line
+    line_nbr=0;
+    unsigned int nbr_names_replaced = 0;
+    for(;;)
+    {
+        if( !std::getline(in, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        auto offset = line.find("@M");
+        if( offset == std::string::npos )
+            continue;
+        std::string header = line.substr(0,offset);
+        std::string moves  = line.substr(offset);
+        for( int i=0; i<2; i++ )
+        {
+            std::string name;
+            bool ok = key_find( header, i==0?"White":"Black", name );
+            if( ok && name!="BYE" )
+            {
+                auto it = players.find(name);
+                if( it == players.end() )
+                {
+                    PlayerDetails pd;
+                    players[name] = pd;
+                    it = players.find(name);
+                }    
+                it->second.name = name;
+                it->second.nbr_games++;
+                std::string date;
+                bool ok2 = key_find(header,"Date",date);
+                if( ok2 )
+                {
+                    int year = atoi( date.c_str() );
+                    if( year > 1000 )
+                    {
+                        if( it->second.first_year == 0 || year < it->second.first_year )
+                            it->second.first_year = year;
+                        if( it->second.last_year == 0 || year > it->second.last_year)
+                            it->second.last_year = year;
+                    }
+                }
+                std::string fide_id;
+                ok2  = key_find( header, i==0?"WhiteFideId":"BlackFideId", fide_id );
+                long id = atol(fide_id.c_str());
+                ok2 = ok2 && id!=0;
+                if( ok2 )
+                {
+                    if( it->second.id == 0 )
+                    {
+                        it->second.id = id;                   
+                        it->second.nbr_games_with_id = 1;
+                    }
+                    else
+                    {
+                        if( it->second.id == id )                    
+                        {
+                            it->second.nbr_games_with_id++;
+                        }
+                        else
+                        {
+                            printf( "Name=%s, fide_id=%s, id=%ld\n", name.c_str(), fide_id.c_str(), id );
+                            it->second.nbr_games_with_other_ids++;
+                            auto it2 = it->second.other_ids.find(id);
+                            if( it2 == it->second.other_ids.end() )
+                                it->second.other_ids.insert(id);
+                        }    
+                    }
+                }
+            }
+        }
+    }
+    printf( "%zu players, writing details to file\n", players.size() );
+    std::vector<PlayerDetails> v;
+    for( std::pair<std::string,PlayerDetails> pr: players )
+        v.push_back(pr.second);
+    std::sort( v.rbegin(), v.rend() );
+    for( const PlayerDetails &pd: v )
+    {
+        std::string line = util::sprintf("%s; %d game%s",
+            pd.name.c_str(),
+            pd.nbr_games,
+            pd.nbr_games==1 ? "" : "s"
+        );
+        line += pd.first_year == pd.last_year
+                ? util::sprintf( ", (%d)", pd.first_year )
+                : util::sprintf( ", (%d-%d)",
+                    pd.first_year,
+                    pd.last_year );
+        if( pd.nbr_games_with_id != 0 )
+        {
+            line += util::sprintf( " %d game%s with id %ld",
+                pd.nbr_games_with_id,
+                pd.nbr_games_with_id==1 ? "" : "s",
+                pd.id
+            );
+            if( pd.nbr_games_with_other_ids != 0 )
+            {
+                line += util::sprintf( " %d game%s with %zu other ids",
+                    pd.nbr_games_with_other_ids,
+                    pd.nbr_games_with_other_ids==1 ? "" : "s",
+                    pd.other_ids.size()
+                );
+                bool first = true;
+                for( long id: pd.other_ids )
+                {
+                    line += util::sprintf( "%s%ld", first?"(":",", id );
+                    first = false;
+                }
+                line += util::sprintf( ")" );
+            }
+        }
+        util::putline(out,line);
+    }
+    return 0;
+}
+
 int cmd_put_name_fide_id( std::ifstream &in_aux, std::ifstream &in, std::ofstream &out )
 {
     std::map<long,std::string> id_names;

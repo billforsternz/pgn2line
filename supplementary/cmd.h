@@ -15,6 +15,7 @@ int cmd_nzcf_game_id( std::ifstream &in, std::ofstream &out );
 int cmd_refine_dups( std::ifstream &in, std::ofstream &out );
 int cmd_remove_exact_pairs( std::ifstream &in, std::ofstream &out );
 int cmd_get_name_fide_id( std::ifstream &in, std::ofstream &out );
+int cmd_get_name_fide_id_plus( std::ifstream &in, std::ofstream &out );
 int cmd_lichess_broadcast_improve( std::ifstream &in, std::ofstream &out );
 int cmd_hardwired( std::ifstream &in, std::ofstream &out );
 int cmd_time( std::ifstream &in, std::ofstream &out );

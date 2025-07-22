@@ -57,7 +57,8 @@ typedef enum
     get_known_fide_id_games_plus,
     add_ratings,        
     tabiya,             
-    get_name_fide_id,   
+    get_name_fide_id,
+    get_name_fide_id_plus,
     lichess_broadcast_improve,
     put_name_fide_id,   
     bulk_out_skeleton,  
@@ -90,7 +91,8 @@ static COMMAND table[] =
                          5,  "zz nz-fide-ids.txt in.lpgn out.lpgn    ;Collect games with NZ players and NZ tournaments"},
     {add_ratings,        5,  "r ratings.txt in.lpgn out.lpgn         ;Fix Lichess names and add ratings"},
     {tabiya,             4,  "y in.lpgn out.lpgn                     ;Find Tabiyas in file"},
-    {get_name_fide_id,   5,  "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file"},
+    {get_name_fide_id,   4,  "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file"},
+    {get_name_fide_id_plus,   4,  "gfp in.lpgn id-players.txt              ;Get player name frequency plus FIDE-ids"},
     {lichess_broadcast_improve,4,"lbi in.lpgn out.lpgn                  ;Lichess broadcast improve"},          
     {put_name_fide_id,   5,  "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file"},
     {bulk_out_skeleton,  5,  "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton"},
@@ -280,6 +282,11 @@ int main( int argc, const char **argv )
         case get_name_fide_id:
         {
             return cmd_get_name_fide_id( in, out );
+            break;
+        }
+        case get_name_fide_id_plus:
+        {
+            return cmd_get_name_fide_id_plus( in, out );
             break;
         }
         case lichess_broadcast_improve:
