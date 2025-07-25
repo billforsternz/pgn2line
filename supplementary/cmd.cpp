@@ -1431,15 +1431,216 @@ struct PlayerDetails
     bool operator < (const PlayerDetails &lhs ) { return nbr_games < lhs.nbr_games; }
 };
 
-int cmd_get_name_fide_id_plus( std::ifstream &in, std::ofstream &out )
+struct NameSplit
 {
-    std::map<std::string,PlayerDetails> players;
+    std::string name;
+    std::string lower;
+    std::string lower_no_period;
+    std::string surname_forename_initial;
+    std::string surname_forename;
+    std::string surname_initial;
+    std::string surname;
+};
+
+struct Triple
+{
+    std::string name;
+    int id;
+    int count = 1;
+};
+
+void split_name( const std::string &name, NameSplit &out )
+{                   
+    out.name = name;
+    std::string s = util::tolower(name);
+    size_t len = s.length();
+    out.lower = s;
+    out.lower_no_period = (len>0 && s[len-1] == '.')
+        ? s.substr(0,len-1)
+        : s;
+    s = out.lower_no_period;
+    out.surname_forename_initial.clear();
+    out.surname_forename.clear();
+    out.surname_initial.clear();
+    out.surname.clear();
+    size_t offset = s.find_first_of(" ,");
+    if( offset != std::string::npos )
+    {
+        out.surname = s.substr(0,offset);
+        if( s[offset]==' ' && out.surname=="van" || out.surname=="mc" )
+        {
+            offset = s.find_first_not_of(' ',offset);
+            if( offset != std::string::npos )
+            {
+                offset = s.find_first_of(" ,",offset);
+                if( offset != std::string::npos )
+                {
+                    out.surname = s.substr(0,offset);
+                    if( s[offset]==' ' && out.surname=="van der" )
+                    {
+                        offset = s.find_first_not_of(' ',offset);
+                        if( offset != std::string::npos )
+                        {
+                            offset = s.find_first_of(" ,",offset);
+                            if( offset != std::string::npos )
+                                out.surname = s.substr(0,offset);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if( offset != std::string::npos )
+    {
+        offset = s.find_first_not_of(" ,",offset);
+        if( offset != std::string::npos )
+        {
+            out.surname_initial = out.surname + ", " + s[offset];
+            out.surname_forename = out.surname + ", " + s.substr(offset);
+            size_t offset2 = s.find_first_of(' ',offset);
+            if( offset2 != std::string::npos )
+            {
+                std::string forename = s.substr(offset,offset2-offset);
+                out.surname_forename = out.surname + ", " + forename;
+                size_t offset3 = s.find_first_not_of(' ',offset2);
+                if( offset3 != std::string::npos )
+                    out.surname_forename_initial  = out.surname_forename + " " + s[offset3];
+            }
+        }
+    }
+}    
+
+int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::ofstream &out )
+{
+    std::map<std::string,Triple> map_name;
+    std::map<std::string,Triple> map_lower;
+    std::map<std::string,Triple> map_lower_no_period;
+    std::map<std::string,Triple> map_surname_forename_initial;
+    std::map<std::string,Triple> map_surname_forename;
+    std::map<std::string,Triple> map_surname_initial;
+
+    // Read the NZ fide ids
+    int nbr_nz_fide_ids = 0;
     std::string line;
     int line_nbr=0;
+    for(;;)
+    {
+        if( !std::getline(in_aux, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        long id = atol(line.c_str());
+        if( id > 0 )
+        {
+            size_t offset = line.find(' ');
+            if( offset != std::string::npos )
+            {
+                offset = line.find_first_not_of(' ',offset);
+                if( offset != std::string::npos )
+                {
+                    nbr_nz_fide_ids++;
+                    std::string name = line.substr(offset);
+                    util::rtrim(name);
+                    Triple triple;
+                    triple.name = name;
+                    triple.id   = id;
+                    NameSplit ns;
+                    split_name(name,ns);
+                    static int count=10;
+                    if( count>0 )
+                    {
+                        count--;
+                        printf( "input=%s\n"
+                            " name=%s\n"
+                            " lower=%s\n"
+                            " lower_no_period=%s\n"
+                            " surname_forename_initial=%s\n"
+                            " surname_forename=%s\n"
+                            " surname_initial=%s\n"
+                            " surname=%s\n",
+                            name.c_str(),
+                            ns.name.c_str(),
+                            ns.lower.c_str(),
+                            ns.lower_no_period.c_str(),
+                            ns.surname_forename_initial.c_str(),
+                            ns.surname_forename.c_str(),
+                            ns.surname_initial.c_str(),
+                            ns.surname.c_str()
+                        );
+                    }
+                    for( int i=0; i<6; i++ )
+                    {
+                        std::map<std::string,Triple> *p = &map_name;                    
+                        std::string q;
+                        switch(i)
+                        {
+                            case 0: p = &map_name;
+                                    q =  ns.name;
+                                    break;
+                            case 1: p = &map_lower;
+                                    q =  ns.lower;
+                                    break;
+                            case 2: p = &map_lower_no_period;
+                                    q =  ns.lower_no_period;
+                                    break;
+                            case 3: p = &map_surname_forename_initial;
+                                    q =  ns.surname_forename_initial;
+                                    break;
+                            case 4: p = &map_surname_forename;
+                                    q =  ns.surname_forename;
+                                    break;
+                            case 5: p = &map_surname_initial;
+                                    q =  ns.surname_initial;
+                                    break;
+                        }
+                        auto it = p->find(q);
+                        if( it == p->end() )
+                            (*p)[q] = triple;
+                        else
+                            it->second.count++;
+                    }
+                    if( name == "Powis, Raphael" )
+                    {
+                        printf( "Store: input=%s\n"
+                            " name=%s\n"
+                            " lower=%s\n"
+                            " lower_no_period=%s\n"
+                            " surname_forename_initial=%s\n"
+                            " surname_forename=%s\n"
+                            " surname_initial=%s\n"
+                            " surname=%s\n",
+                            name.c_str(),
+                            ns.name.c_str(),
+                            ns.lower.c_str(),
+                            ns.lower_no_period.c_str(),
+                            ns.surname_forename_initial.c_str(),
+                            ns.surname_forename.c_str(),
+                            ns.surname_initial.c_str(),
+                            ns.surname.c_str()
+                        );
+                        auto it = map_surname_forename.find(ns.surname_forename.c_str());
+                        if( it == map_surname_forename.end() )
+                            printf("Not found!\n");
+                        else
+                            printf("Found %s\n", it->second.name.c_str() );
+                    }
+                }
+            }
+        }
+    }
+    printf( "%d NZ fide ids read from file\n", nbr_nz_fide_ids );
+
+    std::map<std::string,PlayerDetails> players;
+    line_nbr=0;
 
     // Find names line by line
     line_nbr=0;
     unsigned int nbr_names_replaced = 0;
+    int total_names=0, total_names_with_fide_ids = 0;
     for(;;)
     {
         if( !std::getline(in, line) )
@@ -1461,6 +1662,7 @@ int cmd_get_name_fide_id_plus( std::ifstream &in, std::ofstream &out )
             bool ok = key_find( header, i==0?"White":"Black", name );
             if( ok && name!="BYE" )
             {
+                total_names++;
                 auto it = players.find(name);
                 if( it == players.end() )
                 {
@@ -1489,6 +1691,7 @@ int cmd_get_name_fide_id_plus( std::ifstream &in, std::ofstream &out )
                 ok2 = ok2 && id!=0;
                 if( ok2 )
                 {
+                    total_names_with_fide_ids++;
                     if( it->second.id == 0 )
                     {
                         it->second.id = id;                   
@@ -1513,15 +1716,114 @@ int cmd_get_name_fide_id_plus( std::ifstream &in, std::ofstream &out )
             }
         }
     }
+    printf( "%d names, %d with fide_ids %.1f%%\n",
+        total_names, total_names_with_fide_ids, (total_names_with_fide_ids*100.0) / ((total_names?total_names:1)*1.0) );
     printf( "%zu players, writing details to file\n", players.size() );
     std::vector<PlayerDetails> v;
     for( std::pair<std::string,PlayerDetails> pr: players )
         v.push_back(pr.second);
     std::sort( v.rbegin(), v.rend() );
+
+    int total_names_ext=0, total_names_with_fide_ids_ext=0;
     for( const PlayerDetails &pd: v )
     {
-        std::string line = util::sprintf("%s; %d game%s",
-            pd.name.c_str(),
+        total_names_ext++;
+        if( pd.nbr_games_with_id!=0 && pd.nbr_games_with_other_ids==0 )
+            total_names_with_fide_ids_ext++;
+    }
+    printf( "After back-porting inline fide ids, %d names, %d with fide_ids %.1f%%\n",
+        total_names, total_names_with_fide_ids_ext, (total_names_with_fide_ids_ext*100.0) / ((total_names_ext?total_names_ext:1)*1.0) );
+    for( const PlayerDetails &pd: v )
+    {
+        bool infer = false;
+        long infer_id;
+        std::string infer_string;
+        std::string infer_name;
+        int         infer_count;
+        std::string line = util::sprintf("%-30s", pd.name.c_str() );
+        if( pd.nbr_games_with_id!=0 && pd.nbr_games_with_other_ids==0 )
+        {
+            line += util::sprintf( "%9ld", pd.id );
+        }
+        else
+        {
+            NameSplit ns;
+            split_name( pd.name, ns );
+            if( pd.name == "Beckman, John" )
+            {
+                printf( "Retrieve: input=%s\n"
+                    " name=%s\n"
+                    " lower=%s\n"
+                    " lower_no_period=%s\n"
+                    " surname_forename_initial=%s\n"
+                    " surname_forename=%s\n"
+                    " surname_initial=%s\n"
+                    " surname=%s\n",
+                    pd.name.c_str(),
+                    ns.name.c_str(),
+                    ns.lower.c_str(),
+                    ns.lower_no_period.c_str(),
+                    ns.surname_forename_initial.c_str(),
+                    ns.surname_forename.c_str(),
+                    ns.surname_initial.c_str(),
+                    ns.surname.c_str()
+                );
+                auto it = map_surname_forename.find(ns.surname_forename.c_str());
+                if( it == map_surname_forename.end() )
+                    printf("Not found!\n");
+                else
+                    printf("Found %s\n", it->second.name.c_str() );
+            }
+            for( int i=0; i<6; i++ )
+            {
+                std::map<std::string,Triple> *p = &map_name;                    
+                std::string q;
+                switch(i)
+                {
+                    case 0: p = &map_name;
+                            q =  ns.name;
+                            infer_string = "complete name match";
+                            break;
+                    case 1: p = &map_lower;
+                            q =  ns.lower;
+                            infer_string = "case insensitive match";
+                            break;
+                    case 2: p = &map_lower_no_period;
+                            q =  ns.lower_no_period;
+                            infer_string = "case insensitive match after removing period";
+                            break;
+                    case 3: p = &map_surname_forename_initial;
+                            q =  ns.surname_forename_initial;
+                            infer_string = "surname plus forename plus initial match";
+                            break;
+                    case 4: p = &map_surname_forename;
+                            q =  ns.surname_forename;
+                            infer_string = "surname plus forename match";
+                            break;
+                    case 5: p = &map_surname_initial;
+                            q =  ns.surname_initial;
+                            infer_string = "surname plus initial match";
+                            break;
+                }
+                if( q != "" )
+                {
+                    auto it = p->find(q);
+                    if(it != p->end() )
+                    {
+                        infer = true;
+                        infer_id     = it->second.id;
+                        infer_name   = it->second.name;
+                        infer_count  = it->second.count;
+                        break;
+                    }
+                }
+            }
+            if( !infer )
+                line += util::sprintf("%9s"," " );
+            else
+                line += util::sprintf( "%9ld", infer_id );
+        }
+        line += util::sprintf("  %d game%s",
             pd.nbr_games,
             pd.nbr_games==1 ? "" : "s"
         );
@@ -1552,6 +1854,19 @@ int cmd_get_name_fide_id_plus( std::ifstream &in, std::ofstream &out )
                 }
                 line += util::sprintf( ")" );
             }
+        }
+        if( pd.name == "Beckman, John" )
+            printf( "Debug: name = %s, infer=%s\n", pd.name.c_str(), infer?"true":"false");
+        if( infer )
+        {
+            std::string confidence = "No clashes";
+            if( infer_count > 1 )
+                confidence = util::sprintf( "%d clashes", infer_count );
+            line += util::sprintf(" %s %s %s",
+                        infer_string.c_str(),
+                        infer_name.c_str(),
+                        confidence.c_str()
+                    );
         }
         util::putline(out,line);
     }
@@ -1968,4 +2283,27 @@ int cmd_time( std::ifstream &in, std::ofstream &out )
     }
     return 0;
 } 
+
+// Turn players-list-foa.txt into fide id + player name only
+int cmd_temp( std::ifstream &in, std::ofstream &out )
+{
+    std::string line;
+    int line_nbr=0;
+    for(;;)
+    {
+        if( !std::getline(in, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        if( line.length() > 70 )
+            line = line.substr(0,70);
+        util::rtrim(line);
+        util::putline(out,line);
+    }
+    return 0;
+}
 

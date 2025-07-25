@@ -74,6 +74,7 @@ typedef enum
     pluck_games,        
     pluck_games_reorder,
     remove_exact_pairs, 
+    temp
 } CMD_ENUM;
 
 struct COMMAND
@@ -92,7 +93,7 @@ static COMMAND table[] =
     {add_ratings,        5,  "r ratings.txt in.lpgn out.lpgn         ;Fix Lichess names and add ratings"},
     {tabiya,             4,  "y in.lpgn out.lpgn                     ;Find Tabiyas in file"},
     {get_name_fide_id,   4,  "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file"},
-    {get_name_fide_id_plus,   4,  "gfp in.lpgn id-players.txt              ;Get player name frequency plus FIDE-ids"},
+    {get_name_fide_id_plus,    5,  "gfp nz-fide-ids.txt in.lpgn id-players.txt              ;Get player name frequency plus FIDE-ids"},
     {lichess_broadcast_improve,4,"lbi in.lpgn out.lpgn                  ;Lichess broadcast improve"},          
     {put_name_fide_id,   5,  "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file"},
     {bulk_out_skeleton,  5,  "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton"},
@@ -107,7 +108,8 @@ static COMMAND table[] =
     {refine_dups,        4,  "5 in.lpgn out.lpgn                     ;refine candidate dup pairs"},
     {pluck_games,        5,  "6 bulk.lpgn in.lpgn out.lpgn           ;replace games in input with close matches from bulk"},
     {pluck_games_reorder,5,  "7 bulk.lpgn in.lpgn out.lpgn           ;like 6, but assume pairs and re-order based on bulk location"},
-    {remove_exact_pairs, 4,  "8 in.lpgn out.lpgn                     ;remove exact dup pairs"}
+    {remove_exact_pairs, 4,  "8 in.lpgn out.lpgn                     ;remove exact dup pairs"},
+    {temp,               4,  "temp in.txt out.txt                    ;temp miscellaneous utility sorry!"}
 };
 
 int main( int argc, const char **argv )
@@ -169,6 +171,7 @@ int main( int argc, const char **argv )
         case collect_fide_id:
         case get_known_fide_id_games_plus:
         case put_name_fide_id:
+        case get_name_fide_id_plus:
             argi_input_file = 3;
     }
 
@@ -199,6 +202,7 @@ int main( int argc, const char **argv )
         case collect_fide_id:
         case get_known_fide_id_games_plus:
         case put_name_fide_id:
+        case get_name_fide_id_plus:
         {
             std::string fin_aux(argv[2]);
             std::ifstream in_aux(fin_aux.c_str());
@@ -247,6 +251,11 @@ int main( int argc, const char **argv )
                     return cmd_put_name_fide_id( in_aux, in,  out );
                     break;
                 }
+                case get_name_fide_id_plus:
+                {
+                    return cmd_get_name_fide_id_plus( in_aux, in, out );
+                    break;
+                }
             }
         }
     }
@@ -282,11 +291,6 @@ int main( int argc, const char **argv )
         case get_name_fide_id:
         {
             return cmd_get_name_fide_id( in, out );
-            break;
-        }
-        case get_name_fide_id_plus:
-        {
-            return cmd_get_name_fide_id_plus( in, out );
             break;
         }
         case lichess_broadcast_improve:
@@ -325,6 +329,11 @@ int main( int argc, const char **argv )
             std::string name_tsv( argv[4] );
             std::string teams_csv( argv[5] );
             return cmd_teams( in, out, name_tsv, teams_csv );
+            break;
+        }
+        case temp:
+        {
+            return cmd_temp( in, out );
             break;
         }
     }
