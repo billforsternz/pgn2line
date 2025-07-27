@@ -109,7 +109,7 @@ static COMMAND table[] =
     {pluck_games,        5,  "6 bulk.lpgn in.lpgn out.lpgn           ;replace games in input with close matches from bulk"},
     {pluck_games_reorder,5,  "7 bulk.lpgn in.lpgn out.lpgn           ;like 6, but assume pairs and re-order based on bulk location"},
     {remove_exact_pairs, 4,  "8 in.lpgn out.lpgn                     ;remove exact dup pairs"},
-    {temp,               4,  "temp in.txt out.txt                    ;temp miscellaneous utility sorry!"}
+    {temp,               3,  "temp out.txt                           ;temp miscellaneous utility sorry!"}
 };
 
 int main( int argc, const char **argv )
@@ -157,6 +157,19 @@ int main( int argc, const char **argv )
         }
         printf("Notes: for 1 adds 'Lost on time' comment if \"Time forfeit\" Termination field in Lichess LPGN\n");
         return -1;
+    }
+
+    // Run argc == 3 commands here
+    if( purpose == temp )
+    {
+        std::string fout(argv[2]);
+        std::ofstream out( fout.c_str() );
+        if( !out )
+        {
+            printf( "Error; Cannot open file %s for writing\n", fout.c_str() );
+            return -1;
+        }
+        return cmd_temp( out );
     }
 
     // Find arg index of main input and output files
@@ -329,11 +342,6 @@ int main( int argc, const char **argv )
             std::string name_tsv( argv[4] );
             std::string teams_csv( argv[5] );
             return cmd_teams( in, out, name_tsv, teams_csv );
-            break;
-        }
-        case temp:
-        {
-            return cmd_temp( in, out );
             break;
         }
     }

@@ -2475,26 +2475,67 @@ int cmd_time( std::ifstream &in, std::ofstream &out )
     return 0;
 } 
 
-// Turn players-list-foa.txt into fide id + player name only
-int cmd_temp( std::ifstream &in, std::ofstream &out )
+// Combine fide-id files into one mega fide id file
+int cmd_temp( std::ofstream &out )
 {
-    std::string line;
-    int line_nbr=0;
-    for(;;)
+    std::vector< std::pair<long,std::string>> v;
+    for( int i=0; i<4; i++ )
     {
-        if( !std::getline(in, line) )
-            break;
+        const char *s;
+        switch(i)
+        {
+            default:
+            case 0: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-1992.txt";    break;
+            case 1: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2000.txt";    break;
+            case 2: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2018.txt";    break;
+            case 3: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2025.txt";    break;
+        }
+        std::ifstream in_fide_ids(s);
+        if( !in_fide_ids )
+        {
+            printf( "Error; Cannot open file %s for reading\n", s );
+            return -1;
+        }
+        printf( "Processing input file %s\n", s );
+        int line_nbr=0;
+        for(;;)
+        {
+            std::string line;
+            if( !std::getline( in_fide_ids, line) )
+                break;
 
-        // Strip out UTF8 BOM mark (hex value: EF BB BF)
-        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
-            line = line.substr(3);
-        line_nbr++;
-        util::rtrim(line);
-        if( line.length() > 70 )
-            line = line.substr(0,70);
-        util::rtrim(line);
-        util::putline(out,line);
+            // Strip out UTF8 BOM mark (hex value: EF BB BF)
+            if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+                line = line.substr(3);
+            line_nbr++;
+            util::rtrim(line);
+            if( line.length() > 15 )
+            {
+                std::string ids  = line.substr(0,15);
+                std::string name = line.substr(15);
+                util::trim(ids);
+                long id = atol(ids.c_str());
+                if( id > 0 )
+                {
+                    std::pair<long,std::string> pr(id,name);
+                    v.push_back( pr );
+                }
+            }
+        }
+    }
+    printf( "Sort begin\n" );
+    std::sort(v.begin(),v.end());
+    printf( "Sort end\n" );
+    printf( "Writing output\n" );
+    std::string previous;
+    for(  std::pair<long,std::string> &pr : v )
+    {
+        std::string s = util::sprintf( "%9ld %s", pr.first, pr.second.c_str() );
+        if( s != previous )
+        {
+            util::putline(out,s);
+            previous = s;
+        }
     }
     return 0;
 }
-

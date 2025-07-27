@@ -36,6 +36,6 @@ int cmd_get_known_fide_id_games_plus( std::ifstream &in_aux, std::ifstream &in, 
 // Misc
 int cmd_event( std::ifstream &in, std::ofstream &out, std::string &replace_event );
 int cmd_teams( std::ifstream &in, std::ofstream &out, std::string &name_tsv, std::string &teams_csv );
-int cmd_temp( std::ifstream &in, std::ofstream &out );
+int cmd_temp( std::ofstream &out );
 
 #endif //CMD_H_INCLUDED
