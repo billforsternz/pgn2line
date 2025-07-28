@@ -1418,6 +1418,13 @@ int cmd_get_name_fide_id( std::ifstream &in, std::ofstream &out )
     return 0;
 }
 
+struct Triple
+{
+    std::string name;
+    long id;
+    int count = 1;
+};
+
 struct PlayerDetails
 {
     std::string name;
@@ -1427,9 +1434,10 @@ struct PlayerDetails
     int  nbr_games_with_other_ids=0;
     int  first_year=0;
     int  last_year=0;
-    char match_tier= ' ';   // '0' = not matched, 'A'=best, 'B'=next best etc
     std::set<long> other_ids;
     bool operator < (const PlayerDetails &lhs ) { return nbr_games < lhs.nbr_games; }
+    char match_tier = 0;   // 0 = not matched, 'A'=best, 'B'=next best etc
+    Triple match;           // inferred match
 };
 
 struct NameSplit
@@ -1441,13 +1449,6 @@ struct NameSplit
     std::string surname_forename;
     std::string surname_initial;
     std::string surname;
-};
-
-struct Triple
-{
-    std::string name;
-    int id;
-    int count = 1;
 };
 
 void split_name( const std::string &name, NameSplit &out )
@@ -1520,7 +1521,12 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
     std::map<std::string,Triple> map_surname_forename;
     std::map<std::string,Triple> map_surname_initial;
 
-    // Read the NZ fide ids
+    // Stage 1:
+    // 
+    // Read the NZ fide ids.
+    //  Split each name into a few (N) name forms
+    //  Create N maps named map_ mapping all name form instances to the original name plus id (plus unhelpful but possible collision count)
+    //
     int nbr_nz_fide_ids = 0;
     std::string line;
     int line_nbr=0;
@@ -1615,6 +1621,11 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
     }
     printf( "%d NZ fide ids read from file\n", nbr_nz_fide_ids );
 
+    // Stage 2:
+    // 
+    // Read the players from the game file
+    // Make a single map called players of the player names to all info we have about that player name
+    //
     std::map<std::string,PlayerDetails> players;
     line_nbr=0;
 
@@ -1697,24 +1708,34 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
             }
         }
     }
-    printf( "%d names, %d with fide_ids %.1f%%\n",
-        total_names, total_names_with_fide_ids, (total_names_with_fide_ids*100.0) / ((total_names?total_names:1)*1.0) );
-    printf( "%zu players, writing details to file\n", players.size() );
+
+    // Sort the PlayerDetails by number of games, use this ordering to process and report on the most
+    //  important players first. Unfortunately we now have a map of PlayerDetails and a vector of
+    //  PlayerDetails. Oh well
     std::vector<PlayerDetails> v;
     for( std::pair<std::string,PlayerDetails> pr: players )
         v.push_back(pr.second);
     std::sort( v.rbegin(), v.rend() );
 
-    int total_names_ext=0, total_names_with_fide_ids_ext=0;
+    // Reports on the number of players, number with fide-ids
+    printf( "%d names in game file, %d with immediate fide_ids %.1f%%\n",
+        total_names, total_names_with_fide_ids, (total_names_with_fide_ids*100.0) / ((total_names?total_names:1)*1.0) );
+    int total_names_with_fide_ids_ext=0;
     for( const PlayerDetails &pd: v )
     {
-        total_names_ext++;
         if( pd.nbr_games_with_id!=0 && pd.nbr_games_with_other_ids==0 )
             total_names_with_fide_ids_ext++;
     }
-    printf( "After back-porting inline fide ids, %d names, %d with fide_ids %.1f%%\n",
-        total_names, total_names_with_fide_ids_ext, (total_names_with_fide_ids_ext*100.0) / ((total_names_ext?total_names_ext:1)*1.0) );
-    for( PlayerDetails &pd2: v )
+    printf( "%zu distinct players, %d with fide_ids %.1f%%\n",
+                players.size(),
+                total_names_with_fide_ids_ext,
+                (total_names_with_fide_ids_ext*100.0) / ((players.size()?players.size():1)*1.0) );
+
+    // Stage 3:
+    // 
+    // Try to match the player names from players to the map_ name forms from the NZ fide id file
+    //
+    for( PlayerDetails pd2: v )
     {
         auto jt = players.find(pd2.name);
         if( jt == players.end() )
@@ -1723,51 +1744,36 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
             continue;
         }
         PlayerDetails &pd = jt->second;
-        pd.match_tier = ' ';
-        int infer = 0;
-        long infer_id;
-        std::string infer_string;
-        std::string infer_name;
-        int         infer_count;
-        std::string line = util::sprintf("%-30s", pd.name.c_str() );
+        pd.match_tier = 0;
         if( pd.nbr_games_with_id!=0 && pd.nbr_games_with_other_ids==0 )
-        {
-            line += util::sprintf( "%9ld", pd.id );
             pd.match_tier = 'A';
-        }
         else
         {
             NameSplit ns;
             split_name( pd.name, ns );
-            for( int i=0; i<6; i++ )
+            for( char infer='B'; infer<='G'; infer++ )
             {
                 std::map<std::string,Triple> *p = &map_name;                    
                 std::string q;
-                switch(i)
+                switch(infer)
                 {
-                    case 0: p = &map_name;
+                    case 'B': p = &map_name;
                             q =  ns.name;
-                            infer_string = "complete name match";
                             break;
-                    case 1: p = &map_lower;
+                    case 'C': p = &map_lower;
                             q =  ns.lower;
-                            infer_string = "case insensitive match";
                             break;
-                    case 2: p = &map_lower_no_period;
+                    case 'D': p = &map_lower_no_period;
                             q =  ns.lower_no_period;
-                            infer_string = "case insensitive match after removing period";
                             break;
-                    case 3: p = &map_surname_forename_initial;
+                    case 'E': p = &map_surname_forename_initial;
                             q =  ns.surname_forename_initial;
-                            infer_string = "surname plus forename plus initial match";
                             break;
-                    case 4: p = &map_surname_forename;
+                    case 'F': p = &map_surname_forename;
                             q =  ns.surname_forename;
-                            infer_string = "surname plus forename match";
                             break;
-                    case 5: p = &map_surname_initial;
+                    case 'G': p = &map_surname_initial;
                             q =  ns.surname_initial;
-                            infer_string = "surname plus initial match";
                             break;
                 }
                 if( q.length() > 0 )
@@ -1775,31 +1781,48 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
                     auto it = p->find(q);
                     if( it != p->end() )
                     {
-                        infer = i+1;
-                        infer_id     = it->second.id;
-                        infer_name   = it->second.name;
-                        infer_count  = it->second.count;
-                        if( i== 5 ) // surname_initial
+                        if( infer == 'G' ) // surname_initial
                         {
                             // Important exception,
                             //  "Smith, G" should (weakly) match "Smith, Garry"  BUT
                             //  "Smith, Gordon" should not match "Smith, Garry" through surname initial
                             NameSplit potential;
-                            split_name( infer_name, potential );
+                            split_name( it->second.name, potential );
                             if( ns.surname_forename!="" || potential.surname_forename!="")
                                 infer = 0;  // Kill "Smith, Gordon" and "Smith, Garry"
+                        }
+                        if( infer > 0 )
+                        {
+                            pd.match_tier = infer;
+                            pd.match = it->second;
                         }
                         break;
                     }
                 }
             }
-            if( !infer )
-                line += util::sprintf("%9s"," " );
-            else
-            {
-                pd.match_tier = 'A' + infer;  // inferred match tiers start at 'B'
-                line += util::sprintf( "%9ld", infer_id );
-            }
+        }
+    }
+
+    // Stage 4:
+    // 
+    // Write out a report
+    //
+    for( PlayerDetails pd2: v )
+    {
+        auto jt = players.find(pd2.name);
+        if( jt == players.end() )
+        {
+            printf( "WARNING, unexpected miss\n");
+            continue;
+        }
+        PlayerDetails &pd = jt->second;
+        std::string line = util::sprintf("%-30s", pd.name.c_str() );
+        if( pd.match_tier == 0 )
+            line += util::sprintf("%9s"," " );
+        else
+        {
+            long id = (pd.match_tier == 'A' ? pd.id : pd.match.id);
+            line += util::sprintf( "%9ld", id );
         }
         line += util::sprintf("  %d game%s",
             pd.nbr_games,
@@ -1833,14 +1856,24 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
                 line += util::sprintf( ")" );
             }
         }
-        if( infer )
+        else if( pd.match_tier > 0 )
         {
-            std::string confidence = "No clashes";
-            if( infer_count > 1 )
-                confidence = util::sprintf( "%d clashes", infer_count );
+            std::string infer_txt;
+            switch( pd.match_tier )
+            {
+                case 'B': infer_txt = "complete name match";                            break;
+                case 'C': infer_txt = "case insensitive match";                         break;
+                case 'D': infer_txt = "case insensitive match after removing period";   break;
+                case 'E': infer_txt = "surname plus forename plus initial match";       break;
+                case 'F': infer_txt = "surname plus forename match";                    break;
+                case 'G': infer_txt = "surname plus initial match";                     break;
+            }
+            std::string confidence = "(no clashes)";
+            if( pd.match.count > 1 )
+                confidence = util::sprintf( "(%d clashes)", pd.match.count );
             line += util::sprintf(" %s %s %s",
-                        infer_string.c_str(),
-                        infer_name.c_str(),
+                        infer_txt.c_str(),
+                        pd.match.name.c_str(),
                         confidence.c_str()
                     );
         }
@@ -1933,6 +1966,7 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
                         continue;
                     }    
                     match_tier = it->second.match_tier; // can be ' ' = not matched
+                    #if 0
                     if( match_tier == 'B' )
                     {
                         static int count = 4;
@@ -1945,6 +1979,7 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
                                 header.c_str() );
                         }
                     }
+                    #endif
                 }
                 switch( match_tier )
                 {
@@ -2475,20 +2510,53 @@ int cmd_time( std::ifstream &in, std::ofstream &out )
     return 0;
 } 
 
+struct NameYear
+{
+    NameYear(const std::string &n, int y) {name=n; year=y;}
+    std::string name;
+    int year;
+};
+
+static int counts[2100][2100];
+static void collision_resolve( long id, const std::string &name, int year, NameYear &ny )
+{
+    if( name == ny.name )
+        return;
+    if( util::prefix(name,ny.name) )
+        return;
+    if( util::prefix(ny.name,name) )
+    {
+        if( util::suffix(ny.name," (2)" ) )
+            ny.name = ny.name.substr(0,ny.name.length()-5);
+        return;
+    }
+    counts[year][ny.year]++;
+    printf( "Collision, id=%ld => discard %s(%d), keep %s(%d)\n", id, name.c_str(), year, ny.name.c_str(), ny.year );
+}
+
 // Combine fide-id files into one mega fide id file
 int cmd_temp( std::ofstream &out )
 {
-    std::vector< std::pair<long,std::string>> v;
+    std::map<long,NameYear>  map_combined;
     for( int i=0; i<4; i++ )
     {
+        int year = 2025;
         const char *s;
         switch(i)
         {
             default:
-            case 0: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-1992.txt";    break;
-            case 1: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2000.txt";    break;
-            case 2: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2018.txt";    break;
-            case 3: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2025.txt";    break;
+            case 0: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2025.txt";
+                        year = 2025;
+                        break;
+            case 1: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2018.txt";
+                        year = 2018;
+                        break;
+            case 2: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2000.txt";
+                        year = 2000;
+                        break;
+            case 3: s = "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-1992.txt";
+                        year = 1992;
+                        break;
         }
         std::ifstream in_fide_ids(s);
         if( !in_fide_ids )
@@ -2517,11 +2585,23 @@ int cmd_temp( std::ofstream &out )
                 long id = atol(ids.c_str());
                 if( id > 0 )
                 {
-                    std::pair<long,std::string> pr(id,name);
-                    v.push_back( pr );
+                    auto it = map_combined.find(id);
+                    if( it != map_combined.end() )
+                        collision_resolve( id,name, year, it->second );
+                    else
+                    {
+                        NameYear ny(name,year);
+                        std::pair<long,NameYear> pr(id,ny);
+                        map_combined.insert( pr );
+                    }
                 }
             }
         }
+    }
+    std::vector< std::pair<long,std::string>> v;
+    for( const std::pair<long,NameYear> &pr: map_combined )
+    {
+        v.push_back( std::pair<long,std::string>(pr.first,pr.second.name) );
     }
     printf( "Sort begin\n" );
     std::sort(v.begin(),v.end());
@@ -2530,11 +2610,16 @@ int cmd_temp( std::ofstream &out )
     std::string previous;
     for(  std::pair<long,std::string> &pr : v )
     {
-        std::string s = util::sprintf( "%9ld %s", pr.first, pr.second.c_str() );
-        if( s != previous )
+        std::string s = util::sprintf( "%-9ld %s", pr.first, pr.second.c_str() );
+        util::putline(out,s);
+    }
+    printf( "Collision report\n" );
+    for( int i=0; i<2100; i++ )
+    {
+        for( int j=0; j<2100; j++ )
         {
-            util::putline(out,s);
-            previous = s;
+            if( counts[i][j] > 0 )
+                printf( "Rejected %d names in %d list due to collision with %d list\n", counts[i][j], i, j );
         }
     }
     return 0;

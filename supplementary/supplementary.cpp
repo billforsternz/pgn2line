@@ -114,18 +114,15 @@ static COMMAND table[] =
 
 int main( int argc, const char **argv )
 {
-#ifdef _DEBUG
-#if 0
+#if 1 //def _DEBUG
     const char *args[] =
     {
         "dont-care.exe",
-        "z",
-        "C:/Users/Bill/Documents/Chess/twic/fide-ids-sorted.txt",
-        "C:/Users/Bill/Documents/Chess/twic/twic-400-1542.lpgn",
-        "C:/Users/Bill/Documents/Chess/twic/nz.lpgn"
+        "gfp",
+        "c:/users/bill/documents/chess/nzl/2025/nz-fide-id-combined.txt",
+        "c:/users/bill/documents/chess/nzl/2025/nzl2024.lpgn",
+        "c:/users/bill/documents/chess/nzl/2025/player-details-2024.txt"
     };
-#endif
-
     argc = sizeof(args)/sizeof(args[0]);
     argv = args;
 #endif
