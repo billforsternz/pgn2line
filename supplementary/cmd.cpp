@@ -1436,8 +1436,10 @@ struct PlayerDetails
     int  last_year=0;
     std::set<long> other_ids;
     bool operator < (const PlayerDetails &lhs ) { return nbr_games < lhs.nbr_games; }
-    char match_tier = 0;   // 0 = not matched, 'A'=best, 'B'=next best etc
-    Triple match;           // inferred match
+    int match_tier = 0;   // 0=not matched, 2=has fide_id games, 3,4,5,6,7,8 = NZCF matches
+                          //                                     9,10,11,12,13,14 = FIDE matches   
+                          // 1 is reserved for actual FIDE ID present in a game (rather than PlayerDetails)
+    Triple match;         // inferred (>=3) match
 };
 
 struct NameSplit
@@ -1512,7 +1514,8 @@ void split_name( const std::string &name, NameSplit &out )
     }
 }    
 
-int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::ofstream &out )
+
+struct NameMaps
 {
     std::map<std::string,Triple> map_name;
     std::map<std::string,Triple> map_lower;
@@ -1520,6 +1523,10 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
     std::map<std::string,Triple> map_surname_forename_initial;
     std::map<std::string,Triple> map_surname_forename;
     std::map<std::string,Triple> map_surname_initial;
+};
+
+int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_fide, std::ifstream &in, std::ofstream &out )
+{
 
     // Stage 1:
     // 
@@ -1527,99 +1534,108 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
     //  Split each name into a few (N) name forms
     //  Create N maps named map_ mapping all name form instances to the original name plus id (plus unhelpful but possible collision count)
     //
-    int nbr_nz_fide_ids = 0;
-    std::string line;
-    int line_nbr=0;
-    for(;;)
-    {
-        if( !std::getline(in_aux, line) )
-            break;
-
-        // Strip out UTF8 BOM mark (hex value: EF BB BF)
-        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
-            line = line.substr(3);
-        line_nbr++;
-        util::rtrim(line);
-        long id = atol(line.c_str());
-        if( id > 0 )
+    NameMaps nm_nzcf;
+    NameMaps nm_fide;
+    for( int fed=0; fed<2; fed++) {
+        int nbr_nzcf_players = 0;
+        int nbr_fide_players = 0;
+        int *nbr_players     = (fed==0 ? &nbr_nzcf_players : &nbr_nzcf_players);
+        const char *fed_name = (fed==0 ? "NZCF" : "FIDE" );
+        NameMaps &fmaps       = (fed==0 ? nm_nzcf : nm_fide );
+        std::string line;
+        int line_nbr=0;
+        for(;;)
         {
-            size_t offset = line.find(' ');
-            if( offset != std::string::npos )
+            std::ifstream &in_aux = (fed==0? in_aux_loc : in_aux_fide);
+            if( !std::getline(in_aux, line) )
+                break;
+
+            // Strip out UTF8 BOM mark (hex value: EF BB BF)
+            if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+                line = line.substr(3);
+            line_nbr++;
+            util::rtrim(line);
+            long id = atol(line.c_str());
+            if( id > 0 )
             {
-                offset = line.find_first_not_of(' ',offset);
+                size_t offset = line.find(' ');
                 if( offset != std::string::npos )
                 {
-                    nbr_nz_fide_ids++;
-                    std::string name = line.substr(offset);
-                    util::rtrim(name);
-                    Triple triple;
-                    triple.name = name;
-                    triple.id   = id;
-                    NameSplit ns;
-                    split_name(name,ns);
-                    #if 0
-                    static int count=10;
-                    if( count>0 )
+                    offset = line.find_first_not_of(' ',offset);
+                    if( offset != std::string::npos )
                     {
-                        count--;
-                        printf( "input=%s\n"
-                            " name=%s\n"
-                            " lower=%s\n"
-                            " lower_no_period=%s\n"
-                            " surname_forename_initial=%s\n"
-                            " surname_forename=%s\n"
-                            " surname_initial=%s\n"
-                            " surname=%s\n",
-                            name.c_str(),
-                            ns.name.c_str(),
-                            ns.lower.c_str(),
-                            ns.lower_no_period.c_str(),
-                            ns.surname_forename_initial.c_str(),
-                            ns.surname_forename.c_str(),
-                            ns.surname_initial.c_str(),
-                            ns.surname.c_str()
-                        );
-                    }
-                    #endif
-                    for( int i=0; i<6; i++ )
-                    {
-                        std::map<std::string,Triple> *p = &map_name;                    
-                        std::string q;
-                        switch(i)
+                        (*nbr_players)++;
+                        std::string name = line.substr(offset);
+                        util::rtrim(name);
+                        Triple triple;
+                        triple.name = name;
+                        triple.id   = id;
+                        NameSplit ns;
+                        split_name(name,ns);
+                        #if 0
+                        static int count=10;
+                        if( count>0 )
                         {
-                            case 0: p = &map_name;
-                                    q =  ns.name;
-                                    break;
-                            case 1: p = &map_lower;
-                                    q =  ns.lower;
-                                    break;
-                            case 2: p = &map_lower_no_period;
-                                    q =  ns.lower_no_period;
-                                    break;
-                            case 3: p = &map_surname_forename_initial;
-                                    q =  ns.surname_forename_initial;
-                                    break;
-                            case 4: p = &map_surname_forename;
-                                    q =  ns.surname_forename;
-                                    break;
-                            case 5: p = &map_surname_initial;
-                                    q =  ns.surname_initial;
-                                    break;
+                            count--;
+                            printf( "input=%s\n"
+                                " name=%s\n"
+                                " lower=%s\n"
+                                " lower_no_period=%s\n"
+                                " surname_forename_initial=%s\n"
+                                " surname_forename=%s\n"
+                                " surname_initial=%s\n"
+                                " surname=%s\n",
+                                name.c_str(),
+                                ns.name.c_str(),
+                                ns.lower.c_str(),
+                                ns.lower_no_period.c_str(),
+                                ns.surname_forename_initial.c_str(),
+                                ns.surname_forename.c_str(),
+                                ns.surname_initial.c_str(),
+                                ns.surname.c_str()
+                            );
                         }
-                        if( q.length() > 0 )
+                        #endif
+                        for( int i=0; i<6; i++ )
                         {
-                            auto it = p->find(q);
-                            if( it == p->end() )
-                                (*p)[q] = triple;
-                            else
-                                it->second.count++;
+                            std::map<std::string,Triple> *p = &fmaps.map_name;                    
+                            std::string q;
+                            switch(i)
+                            {
+                                case 0: p = &fmaps.map_name;
+                                        q = ns.name;
+                                        break;
+                                case 1: p = &fmaps.map_lower;
+                                        q = ns.lower;
+                                        break;
+                                case 2: p = &fmaps.map_lower_no_period;
+                                        q = ns.lower_no_period;
+                                        break;
+                                case 3: p = &fmaps.map_surname_forename_initial;
+                                        q = ns.surname_forename_initial;
+                                        break;
+                                case 4: p = &fmaps.map_surname_forename;
+                                        q = ns.surname_forename;
+                                        break;
+                                case 5: p = &fmaps.map_surname_initial;
+                                        q = ns.surname_initial;
+                                        break;
+                            }
+                            if( q.length() > 0 )
+                            {
+                                auto it = p->find(q);
+                                if( it == p->end() )
+                                    (*p)[q] = triple;
+                                else
+                                    it->second.count++;
+                            }
                         }
                     }
                 }
             }
         }
+        printf( "%d %s read from file\n", *nbr_players, fed_name );
     }
-    printf( "%d NZ fide ids read from file\n", nbr_nz_fide_ids );
 
     // Stage 2:
     // 
@@ -1627,7 +1643,8 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
     // Make a single map called players of the player names to all info we have about that player name
     //
     std::map<std::string,PlayerDetails> players;
-    line_nbr=0;
+    int line_nbr=0;
+    std::string line;
 
     // Find names line by line
     line_nbr=0;
@@ -1733,70 +1750,75 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
 
     // Stage 3:
     // 
-    // Try to match the player names from players to the map_ name forms from the NZ fide id file
+    // Try to match the player names from players to the map_ name forms from the NZ and FIDE fide id files
     //
-    for( PlayerDetails pd2: v )
+    for( int fed=0; fed<2; fed++)
     {
-        auto jt = players.find(pd2.name);
-        if( jt == players.end() )
+        NameMaps &fmaps = (fed==0 ? nm_nzcf : nm_fide );
+        for( PlayerDetails pd2: v )
         {
-            printf( "WARNING, unexpected miss\n");
-            continue;
-        }
-        PlayerDetails &pd = jt->second;
-        pd.match_tier = 0;
-        if( pd.nbr_games_with_id!=0 && pd.nbr_games_with_other_ids==0 )
-            pd.match_tier = 'A';
-        else
-        {
-            NameSplit ns;
-            split_name( pd.name, ns );
-            for( char infer='B'; infer<='G'; infer++ )
+            auto jt = players.find(pd2.name);
+            if( jt == players.end() )
             {
-                std::map<std::string,Triple> *p = &map_name;                    
-                std::string q;
-                switch(infer)
+                printf( "WARNING, unexpected miss\n");
+                continue;
+            }
+            PlayerDetails &pd = jt->second;
+            if( pd.match_tier > 0 )
+                continue;
+            if( pd.nbr_games_with_id!=0 && pd.nbr_games_with_other_ids==0 )
+                pd.match_tier = 2;
+            else
+            {
+                NameSplit ns;
+                split_name( pd.name, ns );
+                for( int infer=1; infer<=6; infer++ )
                 {
-                    case 'B': p = &map_name;
-                            q =  ns.name;
-                            break;
-                    case 'C': p = &map_lower;
-                            q =  ns.lower;
-                            break;
-                    case 'D': p = &map_lower_no_period;
-                            q =  ns.lower_no_period;
-                            break;
-                    case 'E': p = &map_surname_forename_initial;
-                            q =  ns.surname_forename_initial;
-                            break;
-                    case 'F': p = &map_surname_forename;
-                            q =  ns.surname_forename;
-                            break;
-                    case 'G': p = &map_surname_initial;
-                            q =  ns.surname_initial;
-                            break;
-                }
-                if( q.length() > 0 )
-                {
-                    auto it = p->find(q);
-                    if( it != p->end() )
+                    std::map<std::string,Triple> *p = &fmaps.map_name;                    
+                    std::string q;
+                    switch(infer)
                     {
-                        if( infer == 'G' ) // surname_initial
+                        case 1: p = &fmaps.map_name;
+                                q = ns.name;
+                                break;
+                        case 2: p = &fmaps.map_lower;
+                                q = ns.lower;
+                                break;
+                        case 3: p = &fmaps.map_lower_no_period;
+                                q = ns.lower_no_period;
+                                break;
+                        case 4: p = &fmaps.map_surname_forename_initial;
+                                q = ns.surname_forename_initial;
+                                break;
+                        case 5: p = &fmaps.map_surname_forename;
+                                q = ns.surname_forename;
+                                break;
+                        case 6: p = &fmaps.map_surname_initial;
+                                q = ns.surname_initial;
+                                break;
+                    }
+                    if( q.length() > 0 )
+                    {
+                        auto it = p->find(q);
+                        if( it != p->end() )
                         {
-                            // Important exception,
-                            //  "Smith, G" should (weakly) match "Smith, Garry"  BUT
-                            //  "Smith, Gordon" should not match "Smith, Garry" through surname initial
-                            NameSplit potential;
-                            split_name( it->second.name, potential );
-                            if( ns.surname_forename!="" || potential.surname_forename!="")
-                                infer = 0;  // Kill "Smith, Gordon" and "Smith, Garry"
+                            if( infer == 6 ) // surname_initial
+                            {
+                                // Important exception,
+                                //  "Smith, G" should (weakly) match "Smith, Garry"  BUT
+                                //  "Smith, Gordon" should not match "Smith, Garry" through surname initial
+                                NameSplit potential;
+                                split_name( it->second.name, potential );
+                                if( ns.surname_forename!="" || potential.surname_forename!="")
+                                    infer = 0;  // Kill "Smith, Gordon" and "Smith, Garry"
+                            }
+                            if( infer > 0 )
+                            {
+                                pd.match_tier = fed==0 ? 2+infer : 8+infer;
+                                pd.match = it->second;
+                            }
+                            break;
                         }
-                        if( infer > 0 )
-                        {
-                            pd.match_tier = infer;
-                            pd.match = it->second;
-                        }
-                        break;
                     }
                 }
             }
@@ -1821,7 +1843,7 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
             line += util::sprintf("%9s"," " );
         else
         {
-            long id = (pd.match_tier == 'A' ? pd.id : pd.match.id);
+            long id = (pd.match_tier < 3 ? pd.id : pd.match.id);
             line += util::sprintf( "%9ld", id );
         }
         line += util::sprintf("  %d game%s",
@@ -1859,19 +1881,27 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
         else if( pd.match_tier > 0 )
         {
             std::string infer_txt;
-            switch( pd.match_tier )
+            int match_tier = pd.match_tier;
+            const char *fed_name="";
+            if( match_tier > 8 )
             {
-                case 'B': infer_txt = "complete name match";                            break;
-                case 'C': infer_txt = "case insensitive match";                         break;
-                case 'D': infer_txt = "case insensitive match after removing period";   break;
-                case 'E': infer_txt = "surname plus forename plus initial match";       break;
-                case 'F': infer_txt = "surname plus forename match";                    break;
-                case 'G': infer_txt = "surname plus initial match";                     break;
+                fed_name = "FIDE ";
+                match_tier -= 6;
+            }
+            switch( match_tier )
+            {
+                case 3: infer_txt = "complete name match";                            break;
+                case 4: infer_txt = "case insensitive match";                         break;
+                case 5: infer_txt = "case insensitive match after removing period";   break;
+                case 6: infer_txt = "surname plus forename plus initial match";       break;
+                case 7: infer_txt = "surname plus forename match";                    break;
+                case 8: infer_txt = "surname plus initial match";                     break;
             }
             std::string confidence = "(no clashes)";
             if( pd.match.count > 1 )
                 confidence = util::sprintf( "(%d clashes)", pd.match.count );
-            line += util::sprintf(" %s %s %s",
+            line += util::sprintf(" %s%s %s %s",
+                        fed_name,
                         infer_txt.c_str(),
                         pd.match.name.c_str(),
                         confidence.c_str()
@@ -1920,6 +1950,41 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
     int nbr_games_0_f = 0;
     int nbr_games_1_f = 0;
     int nbr_games_2_f = 0;
+
+    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'g' or better
+    int nbr_games_0_g = 0;
+    int nbr_games_1_g = 0;
+    int nbr_games_2_g = 0;
+
+    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fb' or better
+    int nbr_games_0_fb = 0;
+    int nbr_games_1_fb = 0;
+    int nbr_games_2_fb = 0;
+
+    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fc' or better
+    int nbr_games_0_fc = 0;
+    int nbr_games_1_fc = 0;
+    int nbr_games_2_fc = 0;
+
+    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fd' or better
+    int nbr_games_0_fd = 0;
+    int nbr_games_1_fd = 0;
+    int nbr_games_2_fd = 0;
+
+    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fe' or better
+    int nbr_games_0_fe = 0;
+    int nbr_games_1_fe = 0;
+    int nbr_games_2_fe = 0;
+
+    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'ff' or better
+    int nbr_games_0_ff = 0;
+    int nbr_games_1_ff = 0;
+    int nbr_games_2_ff = 0;
+
+    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fg' or better
+    int nbr_games_0_fg = 0;
+    int nbr_games_1_fg = 0;
+    int nbr_games_2_fg = 0;
     for(;;)
     {
         if( !std::getline(in, line) )
@@ -1942,6 +2007,13 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
         int nbr_fide_ids_in_game_d = 0;
         int nbr_fide_ids_in_game_e = 0;
         int nbr_fide_ids_in_game_f = 0;
+        int nbr_fide_ids_in_game_g = 0;
+        int nbr_fide_ids_in_game_fb = 0;
+        int nbr_fide_ids_in_game_fc = 0;
+        int nbr_fide_ids_in_game_fd = 0;
+        int nbr_fide_ids_in_game_fe = 0;
+        int nbr_fide_ids_in_game_ff = 0;
+        int nbr_fide_ids_in_game_fg = 0;
 
         // Eval name and fideid tags
         for( int i=0; i<2; i++ )
@@ -1950,13 +2022,13 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
             bool ok = key_find( header, i==0?"White":"Black", name );
             if( ok && name!="BYE" )
             {
-                char match_tier = ' ';
+                int match_tier = 0;
                 std::string fide_id;
                 bool ok2  = key_find( header, i==0?"WhiteFideId":"BlackFideId", fide_id );
                 long id = atol(fide_id.c_str());
                 ok2 = ok2 && id!=0;
                 if( ok2 )
-                    match_tier = 'N';   // native fide-id, not so much a match as an actual fide id
+                    match_tier = 1;   // native fide-id, not so much a match as an actual fide id
                 else
                 {
                     auto it = players.find(name);
@@ -1965,31 +2037,24 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
                         printf( "WARNING: Player name %s, not found second time through\n", name.c_str() );
                         continue;
                     }    
-                    match_tier = it->second.match_tier; // can be ' ' = not matched
-                    #if 0
-                    if( match_tier == 'B' )
-                    {
-                        static int count = 4;
-                        if( count > 0 )
-                        {
-                            count--;
-                            printf( "player=%s, id=%ld, header=%s\n",
-                                it->second.name.c_str(), 
-                                it->second.id,
-                                header.c_str() );
-                        }
-                    }
-                    #endif
+                    match_tier = it->second.match_tier; // can be 0 = not matched
                 }
                 switch( match_tier )
                 {
-                    case 'N':   nbr_fide_ids_in_game_native++;  // fall through
-                    case 'A':   nbr_fide_ids_in_game_a++;       //  ...
-                    case 'B':   nbr_fide_ids_in_game_b++;       //
-                    case 'C':   nbr_fide_ids_in_game_c++;       //  (eg if 'C' criteria met, 'D','E'... also met)
-                    case 'D':   nbr_fide_ids_in_game_d++;       //
-                    case 'E':   nbr_fide_ids_in_game_e++;       
-                    case 'F':   nbr_fide_ids_in_game_f++;       
+                    case 1:   nbr_fide_ids_in_game_native++;  // fall through
+                    case 2:   nbr_fide_ids_in_game_a++;       //  ...
+                    case 3:   nbr_fide_ids_in_game_b++;       //
+                    case 4:   nbr_fide_ids_in_game_c++;       //  (eg if 'C' criteria met, 'D','E'... also met)
+                    case 5:   nbr_fide_ids_in_game_d++;       //
+                    case 6:   nbr_fide_ids_in_game_e++;       
+                    case 7:   nbr_fide_ids_in_game_f++;       
+                    case 8:   nbr_fide_ids_in_game_g++;       
+                    case 9:   nbr_fide_ids_in_game_fb++;
+                    case 10:  nbr_fide_ids_in_game_fc++;
+                    case 11:  nbr_fide_ids_in_game_fd++;
+                    case 12:  nbr_fide_ids_in_game_fe++;
+                    case 13:  nbr_fide_ids_in_game_ff++;
+                    case 14:  nbr_fide_ids_in_game_fg++;
                     default:    ;
                 }
             }
@@ -2024,6 +2089,34 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
         nbr_games_0_f += (nbr_fide_ids_in_game_f==0 ? 1 : 0);
         nbr_games_1_f += (nbr_fide_ids_in_game_f==1 ? 1 : 0);
         nbr_games_2_f += (nbr_fide_ids_in_game_f==2 ? 1 : 0);
+
+        nbr_games_0_g += (nbr_fide_ids_in_game_g==0 ? 1 : 0);
+        nbr_games_1_g += (nbr_fide_ids_in_game_g==1 ? 1 : 0);
+        nbr_games_2_g += (nbr_fide_ids_in_game_g==2 ? 1 : 0);
+
+        nbr_games_0_fb += (nbr_fide_ids_in_game_fb==0 ? 1 : 0);
+        nbr_games_1_fb += (nbr_fide_ids_in_game_fb==1 ? 1 : 0);
+        nbr_games_2_fb += (nbr_fide_ids_in_game_fb==2 ? 1 : 0);
+
+        nbr_games_0_fc += (nbr_fide_ids_in_game_fc==0 ? 1 : 0);
+        nbr_games_1_fc += (nbr_fide_ids_in_game_fc==1 ? 1 : 0);
+        nbr_games_2_fc += (nbr_fide_ids_in_game_fc==2 ? 1 : 0);
+
+        nbr_games_0_fd += (nbr_fide_ids_in_game_fd==0 ? 1 : 0);
+        nbr_games_1_fd += (nbr_fide_ids_in_game_fd==1 ? 1 : 0);
+        nbr_games_2_fd += (nbr_fide_ids_in_game_fd==2 ? 1 : 0);
+
+        nbr_games_0_fe += (nbr_fide_ids_in_game_fe==0 ? 1 : 0);
+        nbr_games_1_fe += (nbr_fide_ids_in_game_fe==1 ? 1 : 0);
+        nbr_games_2_fe += (nbr_fide_ids_in_game_fe==2 ? 1 : 0);
+
+        nbr_games_0_ff += (nbr_fide_ids_in_game_ff==0 ? 1 : 0);
+        nbr_games_1_ff += (nbr_fide_ids_in_game_ff==1 ? 1 : 0);
+        nbr_games_2_ff += (nbr_fide_ids_in_game_ff==2 ? 1 : 0);
+
+        nbr_games_0_fg += (nbr_fide_ids_in_game_fg==0 ? 1 : 0);
+        nbr_games_1_fg += (nbr_fide_ids_in_game_fg==1 ? 1 : 0);
+        nbr_games_2_fg += (nbr_fide_ids_in_game_fg==2 ? 1 : 0);
     }
 
     // Number of games with 0, 1 or 2 fide-ids natively included
@@ -2066,7 +2159,6 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
                                      (nbr_games_2_c*100.0) / ((nbr_games?nbr_games:1)*1.0) );
     printf( "Penetration = %.1f%%\n", (nbr_games_2_c*2 + nbr_games_1_c)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
 
-
     // Number of games with 0, 1 or 2 fide-ids if we include tier D matches or better
     printf( "Number of games with 0, 1 or 2 fide-ids if we include tier D matches or better\n" );
     printf( " 0: %d, %.1f percent\n", nbr_games_0_d,
@@ -2096,6 +2188,77 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux, std::ifstream &in, std::of
     printf( " 2: %d, %.1f percent\n", nbr_games_2_f,
                                      (nbr_games_2_f*100.0) / ((nbr_games?nbr_games:1)*1.0) );
     printf( "Penetration = %.1f%%\n", (nbr_games_2_f*2 + nbr_games_1_f)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+
+    // Number of games with 0, 1 or 2 fide-ids if we include tier G matches or better
+    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier G matches or better\n" );
+    printf( " 0: %d, %.1f percent\n", nbr_games_0_g,
+                                     (nbr_games_0_g*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 1: %d, %.1f percent\n", nbr_games_1_g,
+                                     (nbr_games_1_g*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 2: %d, %.1f percent\n", nbr_games_2_g,
+                                     (nbr_games_2_g*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( "Penetration = %.1f%%\n", (nbr_games_2_g*2 + nbr_games_1_g)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+
+    // Number of games with 0, 1 or 2 fide-ids if we include tier FB matches or better
+    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FB matches or better\n" );
+    printf( " 0: %d, %.1f percent\n", nbr_games_0_fb,
+                                     (nbr_games_0_fb*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 1: %d, %.1f percent\n", nbr_games_1_fb,
+                                     (nbr_games_1_fb*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 2: %d, %.1f percent\n", nbr_games_2_fb,
+                                     (nbr_games_2_fb*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( "Penetration = %.1f%%\n", (nbr_games_2_fb*2 + nbr_games_1_fb)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+
+    // Number of games with 0, 1 or 2 fide-ids if we include tier FC matches or better
+    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FC matches or better\n" );
+    printf( " 0: %d, %.1f percent\n", nbr_games_0_fc,
+                                     (nbr_games_0_fc*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 1: %d, %.1f percent\n", nbr_games_1_fc,
+                                     (nbr_games_1_fc*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 2: %d, %.1f percent\n", nbr_games_2_fc,
+                                     (nbr_games_2_fc*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( "Penetration = %.1f%%\n", (nbr_games_2_fc*2 + nbr_games_1_fc)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+
+
+    // Number of games with 0, 1 or 2 fide-ids if we include tier FD matches or better
+    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FD matches or better\n" );
+    printf( " 0: %d, %.1f percent\n", nbr_games_0_fd,
+                                     (nbr_games_0_fd*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 1: %d, %.1f percent\n", nbr_games_1_fd,
+                                     (nbr_games_1_fd*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 2: %d, %.1f percent\n", nbr_games_2_fd,
+                                     (nbr_games_2_fd*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( "Penetration = %.1f%%\n", (nbr_games_2_fd*2 + nbr_games_1_fd)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+
+    // Number of games with 0, 1 or 2 fide-ids if we include tier FE matches or better
+    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FE matches or better\n" );
+    printf( " 0: %d, %.1f percent\n", nbr_games_0_fe,
+                                     (nbr_games_0_fe*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 1: %d, %.1f percent\n", nbr_games_1_fe,
+                                     (nbr_games_1_fe*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 2: %d, %.1f percent\n", nbr_games_2_fe,
+                                     (nbr_games_2_fe*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( "Penetration = %.1f%%\n", (nbr_games_2_fe*2 + nbr_games_1_fe)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+
+    // Number of games with 0, 1 or 2 fide-ids if we include tier FF matches or better
+    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FF matches or better\n" );
+    printf( " 0: %d, %.1f percent\n", nbr_games_0_ff,
+                                     (nbr_games_0_ff*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 1: %d, %.1f percent\n", nbr_games_1_ff,
+                                     (nbr_games_1_ff*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 2: %d, %.1f percent\n", nbr_games_2_ff,
+                                     (nbr_games_2_ff*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( "Penetration = %.1f%%\n", (nbr_games_2_ff*2 + nbr_games_1_ff)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+
+    // Number of games with 0, 1 or 2 fide-ids if we include tier FG matches or better
+    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FG matches or better\n" );
+    printf( " 0: %d, %.1f percent\n", nbr_games_0_fg,
+                                     (nbr_games_0_fg*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 1: %d, %.1f percent\n", nbr_games_1_fg,
+                                     (nbr_games_1_fg*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( " 2: %d, %.1f percent\n", nbr_games_2_fg,
+                                     (nbr_games_2_fg*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+    printf( "Penetration = %.1f%%\n", (nbr_games_2_fg*2 + nbr_games_1_fg)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
     return 0;
 }
 
@@ -2517,7 +2680,9 @@ struct NameYear
     int year;
 };
 
-static int counts[2100][2100];
+#define BASE_YEAR   1980       // 1980-2049
+#define END_YEAR    2050
+static int counts[END_YEAR-BASE_YEAR][END_YEAR-BASE_YEAR];    
 static void collision_resolve( long id, const std::string &name, int year, NameYear &ny )
 {
     if( name == ny.name )
@@ -2530,7 +2695,7 @@ static void collision_resolve( long id, const std::string &name, int year, NameY
             ny.name = ny.name.substr(0,ny.name.length()-5);
         return;
     }
-    counts[year][ny.year]++;
+    counts[year-BASE_YEAR][ny.year-BASE_YEAR]++;
     printf( "Collision, id=%ld => discard %s(%d), keep %s(%d)\n", id, name.c_str(), year, ny.name.c_str(), ny.year );
 }
 
@@ -2614,12 +2779,13 @@ int cmd_temp( std::ofstream &out )
         util::putline(out,s);
     }
     printf( "Collision report\n" );
-    for( int i=0; i<2100; i++ )
+    for( int i=BASE_YEAR; i<END_YEAR; i++ )
     {
-        for( int j=0; j<2100; j++ )
+        for( int j=BASE_YEAR; j<END_YEAR; j++ )
         {
-            if( counts[i][j] > 0 )
-                printf( "Rejected %d names in %d list due to collision with %d list\n", counts[i][j], i, j );
+            int count = counts[i-BASE_YEAR][j-BASE_YEAR];
+            if( count > 0 )
+                printf( "Rejected %d names in %d list due to collision with %d list\n", count, i, j );
         }
     }
     return 0;
