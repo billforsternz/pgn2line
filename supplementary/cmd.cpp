@@ -1425,6 +1425,45 @@ struct Triple
     int count = 1;
 };
 
+enum NameMatchTier
+{
+    TIER_NULL=0,
+    TIER_HAS_ID,
+    TIER_NATIVE,
+    TIER_NATIONAL_A,
+    TIER_NATIONAL_B,
+    TIER_NATIONAL_C,
+    TIER_NATIONAL_D,
+    TIER_NATIONAL_E,
+    TIER_NATIONAL_F,
+    TIER_FIDE_A,
+    TIER_FIDE_B,
+    TIER_FIDE_C,
+    TIER_FIDE_D,
+    TIER_FIDE_E,
+    TIER_FIDE_F,
+    NBR_TIERS
+};
+
+static const char *tier_txt[] =
+{
+    "no fide-id present or inferred",
+    "player has fide-id in this game",
+    "player has fide-id in other games",
+    "LOCAL complete name match",
+    "LOCAL case insensitive match",
+    "LOCAL case insensitive match after removing period",
+    "LOCAL surname plus forename plus initial match",
+    "LOCAL surname plus forename match",
+    "LOCAL surname plus initial match",
+    "FIDE complete name match",
+    "FIDE case insensitive match",
+    "FIDE case insensitive match after removing period",
+    "FIDE surname plus forename plus initial match",
+    "FIDE surname plus forename match",
+    "FIDE surname plus initial match"
+};
+
 struct PlayerDetails
 {
     std::string name;
@@ -1436,7 +1475,8 @@ struct PlayerDetails
     int  last_year=0;
     std::set<long> other_ids;
     bool operator < (const PlayerDetails &lhs ) { return nbr_games < lhs.nbr_games; }
-    int match_tier = 0;   // 0=not matched, 2=has fide_id games, 3,4,5,6,7,8 = NZCF matches
+    NameMatchTier match_tier = TIER_NULL;
+                          // 0=not matched, 2=has fide_id games, 3,4,5,6,7,8 = NZCF matches
                           //                                     9,10,11,12,13,14 = FIDE matches   
                           // 1 is reserved for actual FIDE ID present in a game (rather than PlayerDetails)
     Triple match;         // inferred (>=3) match
@@ -1463,6 +1503,7 @@ void split_name( const std::string &name, NameSplit &out )
         ? s.substr(0,len-1)
         : s;
     s = out.lower_no_period;
+    len = s.length();
     out.surname_forename_initial.clear();
     out.surname_forename.clear();
     out.surname_initial.clear();
@@ -1500,7 +1541,8 @@ void split_name( const std::string &name, NameSplit &out )
         if( offset != std::string::npos )
         {
             out.surname_initial = out.surname + ", " + s[offset];
-            out.surname_forename = out.surname + ", " + s.substr(offset);
+            if( offset+1 < len )
+                out.surname_forename = out.surname + ", " + s.substr(offset);
             size_t offset2 = s.find_first_of(' ',offset);
             if( offset2 != std::string::npos )
             {
@@ -1634,7 +1676,7 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
                 }
             }
         }
-        printf( "%d %s read from file\n", *nbr_players, fed_name );
+        printf( "%d players read from %s file\n", *nbr_players, fed_name );
     }
 
     // Stage 2:
@@ -1764,10 +1806,10 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
                 continue;
             }
             PlayerDetails &pd = jt->second;
-            if( pd.match_tier > 0 )
+            if( pd.match_tier != TIER_NULL )
                 continue;
             if( pd.nbr_games_with_id!=0 && pd.nbr_games_with_other_ids==0 )
-                pd.match_tier = 2;
+                pd.match_tier = TIER_NATIVE;
             else
             {
                 NameSplit ns;
@@ -1809,13 +1851,23 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
                                 //  "Smith, Gordon" should not match "Smith, Garry" through surname initial
                                 NameSplit potential;
                                 split_name( it->second.name, potential );
-                                if( ns.surname_forename!="" || potential.surname_forename!="")
+                                if( ns.surname_forename!="" && potential.surname_forename!="")
+                                {
                                     infer = 0;  // Kill "Smith, Gordon" and "Smith, Garry"
+                                    printf("Debug kill %30s %s\n",ns.name.c_str(),it->second.name.c_str());
+                                }
+                                else
+                                    printf("Debug keep (%d) %30s %s\n",it->second.count,ns.name.c_str(),it->second.name.c_str());
                             }
                             if( infer > 0 )
                             {
-                                pd.match_tier = fed==0 ? 2+infer : 8+infer;
-                                pd.match = it->second;
+                                if( it->second.count == 1 ) // collisions are poison
+                                {
+                                    int tier = (fed == 0 ? (int)TIER_NATIONAL_A : (int)TIER_FIDE_A);
+                                    tier = tier-1+infer;
+                                    pd.match_tier = (NameMatchTier)tier;
+                                    pd.match = it->second;
+                                }
                             }
                             break;
                         }
@@ -1839,11 +1891,11 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
         }
         PlayerDetails &pd = jt->second;
         std::string line = util::sprintf("%-30s", pd.name.c_str() );
-        if( pd.match_tier == 0 )
+        if( pd.match_tier == TIER_NULL )
             line += util::sprintf("%9s"," " );
         else
         {
-            long id = (pd.match_tier < 3 ? pd.id : pd.match.id);
+            long id = (pd.match_tier < TIER_NATIONAL_A ? pd.id : pd.match.id);
             line += util::sprintf( "%9ld", id );
         }
         line += util::sprintf("  %d game%s",
@@ -1878,31 +1930,13 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
                 line += util::sprintf( ")" );
             }
         }
-        else if( pd.match_tier > 0 )
+        else if( pd.match_tier != TIER_NULL )
         {
-            std::string infer_txt;
-            int match_tier = pd.match_tier;
-            const char *fed_name="";
-            if( match_tier > 8 )
-            {
-                fed_name = "FIDE ";
-                match_tier -= 6;
-            }
-            switch( match_tier )
-            {
-                case 3: infer_txt = "complete name match";                            break;
-                case 4: infer_txt = "case insensitive match";                         break;
-                case 5: infer_txt = "case insensitive match after removing period";   break;
-                case 6: infer_txt = "surname plus forename plus initial match";       break;
-                case 7: infer_txt = "surname plus forename match";                    break;
-                case 8: infer_txt = "surname plus initial match";                     break;
-            }
             std::string confidence = "(no clashes)";
             if( pd.match.count > 1 )
                 confidence = util::sprintf( "(%d clashes)", pd.match.count );
-            line += util::sprintf(" %s%s %s %s",
-                        fed_name,
-                        infer_txt.c_str(),
+            line += util::sprintf(" %s %s %s",
+                        tier_txt[pd.match_tier],
                         pd.match.name.c_str(),
                         confidence.c_str()
                     );
@@ -1916,75 +1950,16 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
     line_nbr=0;
     int nbr_games = 0;
 
-    // Number of games with 0, 1 or 2 fide-ids natively included
-    int nbr_games_0_native = 0; 
-    int nbr_games_1_native = 0;
-    int nbr_games_2_native = 0; 
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'a' 
-    int nbr_games_0_a = 0; 
-    int nbr_games_1_a = 0;
-    int nbr_games_2_a = 0; 
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'b' or better
-    int nbr_games_0_b = 0;
-    int nbr_games_1_b = 0;
-    int nbr_games_2_b = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'c' or better
-    int nbr_games_0_c = 0;
-    int nbr_games_1_c = 0;
-    int nbr_games_2_c = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'd' or better
-    int nbr_games_0_d = 0;
-    int nbr_games_1_d = 0;
-    int nbr_games_2_d = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'e' or better
-    int nbr_games_0_e = 0;
-    int nbr_games_1_e = 0;
-    int nbr_games_2_e = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'f' or better
-    int nbr_games_0_f = 0;
-    int nbr_games_1_f = 0;
-    int nbr_games_2_f = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'g' or better
-    int nbr_games_0_g = 0;
-    int nbr_games_1_g = 0;
-    int nbr_games_2_g = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fb' or better
-    int nbr_games_0_fb = 0;
-    int nbr_games_1_fb = 0;
-    int nbr_games_2_fb = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fc' or better
-    int nbr_games_0_fc = 0;
-    int nbr_games_1_fc = 0;
-    int nbr_games_2_fc = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fd' or better
-    int nbr_games_0_fd = 0;
-    int nbr_games_1_fd = 0;
-    int nbr_games_2_fd = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fe' or better
-    int nbr_games_0_fe = 0;
-    int nbr_games_1_fe = 0;
-    int nbr_games_2_fe = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'ff' or better
-    int nbr_games_0_ff = 0;
-    int nbr_games_1_ff = 0;
-    int nbr_games_2_ff = 0;
-
-    // Number of games with 0, 1 or 2 fide-ids including infered ids, level 'fg' or better
-    int nbr_games_0_fg = 0;
-    int nbr_games_1_fg = 0;
-    int nbr_games_2_fg = 0;
+    // Total number of games with each of 0, 1 or 2 fide-ids up to each tier level
+    int nbr_games_0[NBR_TIERS];
+    int nbr_games_1[NBR_TIERS];
+    int nbr_games_2[NBR_TIERS];
+    for( int i=0; i<NBR_TIERS; i++ )
+    {
+        nbr_games_0[i] = 0;
+        nbr_games_1[i] = 0;
+        nbr_games_2[i] = 0;
+    }
     for(;;)
     {
         if( !std::getline(in, line) )
@@ -2000,20 +1975,11 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
             continue;
         std::string header = line.substr(0,offset);
         std::string moves  = line.substr(offset);
-        int nbr_fide_ids_in_game_native = 0;
-        int nbr_fide_ids_in_game_a = 0;
-        int nbr_fide_ids_in_game_b = 0;
-        int nbr_fide_ids_in_game_c = 0;
-        int nbr_fide_ids_in_game_d = 0;
-        int nbr_fide_ids_in_game_e = 0;
-        int nbr_fide_ids_in_game_f = 0;
-        int nbr_fide_ids_in_game_g = 0;
-        int nbr_fide_ids_in_game_fb = 0;
-        int nbr_fide_ids_in_game_fc = 0;
-        int nbr_fide_ids_in_game_fd = 0;
-        int nbr_fide_ids_in_game_fe = 0;
-        int nbr_fide_ids_in_game_ff = 0;
-        int nbr_fide_ids_in_game_fg = 0;
+
+        // Number of fide_ids in this game; 0, 1 or 2
+        int nbr_fide_ids_in_game[NBR_TIERS];
+        for( int i=0; i<NBR_TIERS; i++ )
+            nbr_fide_ids_in_game[i] = 0;
 
         // Eval name and fideid tags
         for( int i=0; i<2; i++ )
@@ -2022,13 +1988,13 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
             bool ok = key_find( header, i==0?"White":"Black", name );
             if( ok && name!="BYE" )
             {
-                int match_tier = 0;
+                NameMatchTier match_tier = TIER_NULL;
                 std::string fide_id;
                 bool ok2  = key_find( header, i==0?"WhiteFideId":"BlackFideId", fide_id );
                 long id = atol(fide_id.c_str());
                 ok2 = ok2 && id!=0;
                 if( ok2 )
-                    match_tier = 1;   // native fide-id, not so much a match as an actual fide id
+                    match_tier = TIER_HAS_ID;
                 else
                 {
                     auto it = players.find(name);
@@ -2037,228 +2003,40 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
                         printf( "WARNING: Player name %s, not found second time through\n", name.c_str() );
                         continue;
                     }    
-                    match_tier = it->second.match_tier; // can be 0 = not matched
+                    match_tier = it->second.match_tier;
                 }
-                switch( match_tier )
+
+                // Increment this tier and all weaker tiers
+                if( match_tier != TIER_NULL )
                 {
-                    case 1:   nbr_fide_ids_in_game_native++;  // fall through
-                    case 2:   nbr_fide_ids_in_game_a++;       //  ...
-                    case 3:   nbr_fide_ids_in_game_b++;       //
-                    case 4:   nbr_fide_ids_in_game_c++;       //  (eg if 'C' criteria met, 'D','E'... also met)
-                    case 5:   nbr_fide_ids_in_game_d++;       //
-                    case 6:   nbr_fide_ids_in_game_e++;       
-                    case 7:   nbr_fide_ids_in_game_f++;       
-                    case 8:   nbr_fide_ids_in_game_g++;       
-                    case 9:   nbr_fide_ids_in_game_fb++;
-                    case 10:  nbr_fide_ids_in_game_fc++;
-                    case 11:  nbr_fide_ids_in_game_fd++;
-                    case 12:  nbr_fide_ids_in_game_fe++;
-                    case 13:  nbr_fide_ids_in_game_ff++;
-                    case 14:  nbr_fide_ids_in_game_fg++;
-                    default:    ;
+                    for( int i=match_tier; i<NBR_TIERS; i++ )
+                        nbr_fide_ids_in_game[i]++;
                 }
             }
         }
 
         // Update stats
         nbr_games++;
-        nbr_games_0_native += (nbr_fide_ids_in_game_native==0 ? 1 : 0); 
-        nbr_games_1_native += (nbr_fide_ids_in_game_native==1 ? 1 : 0);
-        nbr_games_2_native += (nbr_fide_ids_in_game_native==2 ? 1 : 0); 
-
-        nbr_games_0_a += (nbr_fide_ids_in_game_a==0 ? 1 : 0); 
-        nbr_games_1_a += (nbr_fide_ids_in_game_a==1 ? 1 : 0);
-        nbr_games_2_a += (nbr_fide_ids_in_game_a==2 ? 1 : 0); 
-
-        nbr_games_0_b += (nbr_fide_ids_in_game_b==0 ? 1 : 0);
-        nbr_games_1_b += (nbr_fide_ids_in_game_b==1 ? 1 : 0);
-        nbr_games_2_b += (nbr_fide_ids_in_game_b==2 ? 1 : 0);
-
-        nbr_games_0_c += (nbr_fide_ids_in_game_c==0 ? 1 : 0);
-        nbr_games_1_c += (nbr_fide_ids_in_game_c==1 ? 1 : 0);
-        nbr_games_2_c += (nbr_fide_ids_in_game_c==2 ? 1 : 0);
-
-        nbr_games_0_d += (nbr_fide_ids_in_game_d==0 ? 1 : 0);
-        nbr_games_1_d += (nbr_fide_ids_in_game_d==1 ? 1 : 0);
-        nbr_games_2_d += (nbr_fide_ids_in_game_d==2 ? 1 : 0);
-
-        nbr_games_0_e += (nbr_fide_ids_in_game_e==0 ? 1 : 0);
-        nbr_games_1_e += (nbr_fide_ids_in_game_e==1 ? 1 : 0);
-        nbr_games_2_e += (nbr_fide_ids_in_game_e==2 ? 1 : 0);
-
-        nbr_games_0_f += (nbr_fide_ids_in_game_f==0 ? 1 : 0);
-        nbr_games_1_f += (nbr_fide_ids_in_game_f==1 ? 1 : 0);
-        nbr_games_2_f += (nbr_fide_ids_in_game_f==2 ? 1 : 0);
-
-        nbr_games_0_g += (nbr_fide_ids_in_game_g==0 ? 1 : 0);
-        nbr_games_1_g += (nbr_fide_ids_in_game_g==1 ? 1 : 0);
-        nbr_games_2_g += (nbr_fide_ids_in_game_g==2 ? 1 : 0);
-
-        nbr_games_0_fb += (nbr_fide_ids_in_game_fb==0 ? 1 : 0);
-        nbr_games_1_fb += (nbr_fide_ids_in_game_fb==1 ? 1 : 0);
-        nbr_games_2_fb += (nbr_fide_ids_in_game_fb==2 ? 1 : 0);
-
-        nbr_games_0_fc += (nbr_fide_ids_in_game_fc==0 ? 1 : 0);
-        nbr_games_1_fc += (nbr_fide_ids_in_game_fc==1 ? 1 : 0);
-        nbr_games_2_fc += (nbr_fide_ids_in_game_fc==2 ? 1 : 0);
-
-        nbr_games_0_fd += (nbr_fide_ids_in_game_fd==0 ? 1 : 0);
-        nbr_games_1_fd += (nbr_fide_ids_in_game_fd==1 ? 1 : 0);
-        nbr_games_2_fd += (nbr_fide_ids_in_game_fd==2 ? 1 : 0);
-
-        nbr_games_0_fe += (nbr_fide_ids_in_game_fe==0 ? 1 : 0);
-        nbr_games_1_fe += (nbr_fide_ids_in_game_fe==1 ? 1 : 0);
-        nbr_games_2_fe += (nbr_fide_ids_in_game_fe==2 ? 1 : 0);
-
-        nbr_games_0_ff += (nbr_fide_ids_in_game_ff==0 ? 1 : 0);
-        nbr_games_1_ff += (nbr_fide_ids_in_game_ff==1 ? 1 : 0);
-        nbr_games_2_ff += (nbr_fide_ids_in_game_ff==2 ? 1 : 0);
-
-        nbr_games_0_fg += (nbr_fide_ids_in_game_fg==0 ? 1 : 0);
-        nbr_games_1_fg += (nbr_fide_ids_in_game_fg==1 ? 1 : 0);
-        nbr_games_2_fg += (nbr_fide_ids_in_game_fg==2 ? 1 : 0);
+        for( int i=0; i<NBR_TIERS; i++ )
+        {
+            nbr_games_0[i] += (nbr_fide_ids_in_game[i] == 0 ? 1 : 0 );
+            nbr_games_1[i] += (nbr_fide_ids_in_game[i] == 1 ? 1 : 0 );
+            nbr_games_2[i] += (nbr_fide_ids_in_game[i] == 2 ? 1 : 0 );
+        }
     }
 
-    // Number of games with 0, 1 or 2 fide-ids natively included
-    printf( "Number of games with 0, 1 or 2 fide-ids natively included\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_native,
-                                     (nbr_games_0_native*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_native,
-                                     (nbr_games_1_native*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_native,
-                                     (nbr_games_2_native*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_native*2 + nbr_games_1_native)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier A matches
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier A matches\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_a,
-                                     (nbr_games_0_a*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_a,
-                                     (nbr_games_1_a*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_a,
-                                     (nbr_games_2_a*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_a*2 + nbr_games_1_a)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier B matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier B matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_b,
-                                     (nbr_games_0_b*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_b,
-                                     (nbr_games_1_b*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_b,
-                                     (nbr_games_2_b*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_b*2 + nbr_games_1_b)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier C matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier C matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_c,
-                                     (nbr_games_0_c*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_c,
-                                     (nbr_games_1_c*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_c,
-                                     (nbr_games_2_c*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_c*2 + nbr_games_1_c)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier D matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier D matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_d,
-                                     (nbr_games_0_d*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_d,
-                                     (nbr_games_1_d*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_d,
-                                     (nbr_games_2_d*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_d*2 + nbr_games_1_d)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier E matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier E matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_e,
-                                     (nbr_games_0_e*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_e,
-                                     (nbr_games_1_e*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_e,
-                                     (nbr_games_2_e*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_e*2 + nbr_games_1_e)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier F matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier F matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_f,
-                                     (nbr_games_0_f*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_f,
-                                     (nbr_games_1_f*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_f,
-                                     (nbr_games_2_f*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_f*2 + nbr_games_1_f)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier G matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier G matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_g,
-                                     (nbr_games_0_g*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_g,
-                                     (nbr_games_1_g*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_g,
-                                     (nbr_games_2_g*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_g*2 + nbr_games_1_g)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier FB matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FB matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_fb,
-                                     (nbr_games_0_fb*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_fb,
-                                     (nbr_games_1_fb*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_fb,
-                                     (nbr_games_2_fb*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_fb*2 + nbr_games_1_fb)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier FC matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FC matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_fc,
-                                     (nbr_games_0_fc*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_fc,
-                                     (nbr_games_1_fc*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_fc,
-                                     (nbr_games_2_fc*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_fc*2 + nbr_games_1_fc)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier FD matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FD matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_fd,
-                                     (nbr_games_0_fd*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_fd,
-                                     (nbr_games_1_fd*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_fd,
-                                     (nbr_games_2_fd*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_fd*2 + nbr_games_1_fd)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier FE matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FE matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_fe,
-                                     (nbr_games_0_fe*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_fe,
-                                     (nbr_games_1_fe*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_fe,
-                                     (nbr_games_2_fe*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_fe*2 + nbr_games_1_fe)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier FF matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FF matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_ff,
-                                     (nbr_games_0_ff*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_ff,
-                                     (nbr_games_1_ff*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_ff,
-                                     (nbr_games_2_ff*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_ff*2 + nbr_games_1_ff)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
-
-    // Number of games with 0, 1 or 2 fide-ids if we include tier FG matches or better
-    printf( "Number of games with 0, 1 or 2 fide-ids if we include tier FG matches or better\n" );
-    printf( " 0: %d, %.1f percent\n", nbr_games_0_fg,
-                                     (nbr_games_0_fg*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 1: %d, %.1f percent\n", nbr_games_1_fg,
-                                     (nbr_games_1_fg*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( " 2: %d, %.1f percent\n", nbr_games_2_fg,
-                                     (nbr_games_2_fg*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-    printf( "Penetration = %.1f%%\n", (nbr_games_2_fg*2 + nbr_games_1_fg)*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+    // Number of games with 0, 1 or 2 fide-ids once matches from each tier are included
+    for( int i=1; i<NBR_TIERS; i++ )
+    {
+        printf( "Number of games with 0, 1 or 2 fide-ids if we include name matches up to tier: %s.\n", tier_txt[i] );
+        printf( " 0: %d, %.1f percent\n", nbr_games_0[i],
+                                         (nbr_games_0[i]*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+        printf( " 1: %d, %.1f percent\n", nbr_games_1[i],
+                                         (nbr_games_1[i]*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+        printf( " 2: %d, %.1f percent\n", nbr_games_2[i],
+                                         (nbr_games_2[i]*100.0) / ((nbr_games?nbr_games:1)*1.0) );
+        printf( "Penetration = %.1f%%\n", (nbr_games_2[i]*2 + nbr_games_1[i])*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+    }
     return 0;
 }
 
