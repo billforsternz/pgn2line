@@ -58,7 +58,7 @@ typedef enum
     add_ratings,        
     tabiya,             
     get_name_fide_id,
-    get_name_fide_id_plus,
+    propogate,
     lichess_broadcast_improve,
     put_name_fide_id,   
     bulk_out_skeleton,  
@@ -93,7 +93,7 @@ static COMMAND table[] =
     {add_ratings,        5,  "r ratings.txt in.lpgn out.lpgn         ;Fix Lichess names and add ratings"},
     {tabiya,             4,  "y in.lpgn out.lpgn                     ;Find Tabiyas in file"},
     {get_name_fide_id,   4,  "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file"},
-    {get_name_fide_id_plus,    7,"gfp manual-fide-ids.txt nat-fide-ids.txt fide-ids.txt in.lpgn id-players.txt   ;Get player name frequency plus FIDE-ids"},
+    {propogate,          7,  "propogate manual-fide-ids.txt nat-fide-ids.txt fide-ids.txt in.lpgn id-players.txt   ;Get player name frequency plus FIDE-ids"},
     {lichess_broadcast_improve,4,"lbi in.lpgn out.lpgn                  ;Lichess broadcast improve"},          
     {put_name_fide_id,   5,  "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file"},
     {bulk_out_skeleton,  5,  "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton"},
@@ -118,7 +118,7 @@ int main( int argc, const char **argv )
     const char *args[] =
     {
         "dont-care.exe",
-        "gfp",
+        "propogate",
         "c:/users/bill/documents/chess/nzl/2025/manual-fide-id-adjustments.txt",
         "c:/users/bill/documents/chess/nzl/2025/nz-fide-id-combined.txt",
         "c:/users/bill/documents/chess/nzl/2025/fide-ids-combined-2025.txt",
@@ -185,7 +185,7 @@ int main( int argc, const char **argv )
         case put_name_fide_id:
             argi_input_file = 3;
             break;
-        case get_name_fide_id_plus:
+        case propogate:
             argi_input_file = 5;
     }
 
@@ -216,7 +216,7 @@ int main( int argc, const char **argv )
         case collect_fide_id:
         case get_known_fide_id_games_plus:
         case put_name_fide_id:
-        case get_name_fide_id_plus:
+        case propogate:
         {
             std::string fin_aux(argv[2]);
             std::ifstream in_aux(fin_aux.c_str());
@@ -265,7 +265,7 @@ int main( int argc, const char **argv )
                     return cmd_put_name_fide_id( in_aux, in,  out );
                     break;
                 }
-                case get_name_fide_id_plus:
+                case propogate:
                 {
                     std::string fin_aux2(argv[3]);
                     std::ifstream in_aux2(fin_aux2.c_str());
@@ -281,7 +281,7 @@ int main( int argc, const char **argv )
                         printf( "Error; Cannot open file %s for reading\n", fin_aux3.c_str() );
                         return -1;
                     }
-                    return cmd_get_name_fide_id_plus( in_aux, in_aux2, in_aux3, in, out );
+                    return cmd_propogate( in_aux, in_aux2, in_aux3, in, out );
                     break;
                 }
             }
