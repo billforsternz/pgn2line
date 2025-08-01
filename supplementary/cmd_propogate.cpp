@@ -106,27 +106,36 @@ void split_name( const std::string &name, NameSplit &out )
     out.surname_forename.clear();
     out.surname_initial.clear();
     out.surname.clear();
-    size_t offset = s.find_first_of(" ,");
+    size_t offset = s.find(',');    //_first_of(" ,");
     if( offset != std::string::npos )
     {
         out.surname = s.substr(0,offset);
-        if( (s[offset]==' ') && (out.surname=="van" || out.surname=="mc" || out.surname=="du" || out.surname=="de") )
+        util::rtrim(out.surname);
+    }
+    else
+    {
+        offset = s.find_first_of(" ,");
+        if( offset != std::string::npos )
         {
-            offset = s.find_first_not_of(' ',offset);
-            if( offset != std::string::npos )
+            out.surname = s.substr(0,offset);
+            if( (s[offset]==' ') && (out.surname=="van" || out.surname=="mc" || out.surname=="du" || out.surname=="de") )
             {
-                offset = s.find_first_of(" ,",offset);
+                offset = s.find_first_not_of(' ',offset);
                 if( offset != std::string::npos )
                 {
-                    out.surname = s.substr(0,offset);
-                    if( s[offset]==' ' && out.surname=="van der" )
+                    offset = s.find_first_of(" ,",offset);
+                    if( offset != std::string::npos )
                     {
-                        offset = s.find_first_not_of(' ',offset);
-                        if( offset != std::string::npos )
+                        out.surname = s.substr(0,offset);
+                        if( s[offset]==' ' && out.surname=="van der" )
                         {
-                            offset = s.find_first_of(" ,",offset);
+                            offset = s.find_first_not_of(' ',offset);
                             if( offset != std::string::npos )
-                                out.surname = s.substr(0,offset);
+                            {
+                                offset = s.find_first_of(" ,",offset);
+                                if( offset != std::string::npos )
+                                    out.surname = s.substr(0,offset);
+                            }
                         }
                     }
                 }
@@ -164,7 +173,9 @@ struct NameMaps
     std::map<std::string,Triple> map_surname_initial;
 };
 
-int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std::ifstream &in_aux_fide, std::ifstream &in, std::ofstream &out )
+int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std::ifstream &in_aux_fide,
+                   std::ifstream &in, std::ofstream &out,
+                   std::ofstream &out_report )
 {
 
     // Stage 1:
@@ -180,7 +191,7 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
         int nbr_manual_players = 0;
         int nbr_nzcf_players = 0;
         int nbr_fide_players = 0;
-        int *nbr_players     = fed==0 ? &nbr_manual_players : (fed==1 ? &nbr_nzcf_players : &nbr_nzcf_players);
+        int *nbr_players     = fed==0 ? &nbr_manual_players : (fed==1 ? &nbr_nzcf_players : &nbr_fide_players);
         const char *fed_name = fed==0 ? "Manual"            : (fed==1 ? "NZCF" : "FIDE");
         NameMaps &fmaps      = fed==0 ? nm_manual           : (fed==1 ? nm_nzcf : nm_fide );
         std::string line;
@@ -454,10 +465,10 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                                 if( ns.surname_forename!="" && potential.surname_forename!="")
                                 {
                                     infer = 0;  // Kill "Smith, Gordon" and "Smith, Garry"
-                                    printf("Debug kill %30s %s\n",ns.name.c_str(),it->second.name.c_str());
+                                    //printf("Debug kill %30s %s\n",ns.name.c_str(),it->second.name.c_str());
                                 }
-                                else
-                                    printf("Debug keep (%d) %30s %s\n",it->second.count,ns.name.c_str(),it->second.name.c_str());
+                                //else
+                                //    printf("Debug keep (%d) %30s %s\n",it->second.count,ns.name.c_str(),it->second.name.c_str());
                             }
                             if( infer > 0 )
                             {
@@ -470,7 +481,7 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                                         //  saying player does not have a fide-id, eg Cecil Purdy (useful for filtering
                                         //  out someone early - useful if their name might be more likely to yield false
                                         //  positives than Cecil Purdy)
-                                        pd.match_tier = pd.match.id == 1 ? TIER_DOES_NOT_HAVE_ID : TIER_MANUAL;
+                                        pd.match_tier = (pd.match.id == 1 ? TIER_DOES_NOT_HAVE_ID : TIER_MANUAL);
                                     }
                                     else
                                     {
@@ -507,6 +518,7 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
         else
         {
             long id = (pd.match_tier < TIER_MANUAL ? pd.id : pd.match.id);
+            pd.id = id;
             line += util::sprintf( "%9ld", id );
         }
         line += util::sprintf("  %d game%s",
@@ -552,16 +564,20 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                         confidence.c_str()
                     );
         }
-        util::putline(out,line);
+        util::putline(out_report,line);
     }
 
-    // Calculate number of games with FIDE-ids, before and after
+    //
+    // Stage 5: Output file with propogated fide-ids
+    //
     in.clear();
     in.seekg(0);
     line_nbr=0;
     int nbr_games = 0;
+    NameMatchTier tier_cutoff = TIER_FIDE_D;
+    printf( "Tier cutoff for match is %s\n", tier_txt[tier_cutoff] );
 
-    // Total number of games with each of 0, 1 or 2 fide-ids up to each tier level
+    // Calc some stats as we go, total number of games with each of 0, 1 or 2 fide-ids up to each tier level
     int nbr_games_0[NBR_TIERS];
     int nbr_games_1[NBR_TIERS];
     int nbr_games_2[NBR_TIERS];
@@ -615,9 +631,14 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                         continue;
                     }    
                     match_tier = it->second.match_tier;
+                    if( TIER_MANUAL <= match_tier && match_tier <= tier_cutoff )
+                    {
+                        std::string s = util::sprintf("%ld",it->second.id);
+                        key_update(header,i==0?"WhiteFideId":"BlackFideId","Result",s);
+                    }
                 }
 
-                // Increment this tier and all weaker tiers
+                // Increment 0/1/2 fide-ids in this game for this tier and all weaker tiers
                 if( match_tier > TIER_DOES_NOT_HAVE_ID )
                 {
                     for( int i=match_tier; i<NBR_TIERS; i++ )
@@ -625,6 +646,9 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                 }
             }
         }
+
+        // Write updated output
+        util::putline(out,header+moves);       
 
         // Update stats
         nbr_games++;
@@ -646,7 +670,11 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                                          (nbr_games_1[i]*100.0) / ((nbr_games?nbr_games:1)*1.0) );
         printf( " 2: %d, %.1f percent\n", nbr_games_2[i],
                                          (nbr_games_2[i]*100.0) / ((nbr_games?nbr_games:1)*1.0) );
-        printf( "Penetration = %.1f%%\n", (nbr_games_2[i]*2 + nbr_games_1[i])*100.0 / ((nbr_games?nbr_games:1)*2.0) );                                        
+        printf( "Penetration = %.1f%%\n", (nbr_games_2[i]*2 + nbr_games_1[i])*100.0 / ((nbr_games?nbr_games:1)*2.0) );
+        if( i == tier_cutoff )
+        {
+            printf( "\n====== Cutoff is here ======\n" );
+        }
     }
     return 0;
 }

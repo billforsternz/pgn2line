@@ -93,7 +93,7 @@ static COMMAND table[] =
     {add_ratings,        5,  "r ratings.txt in.lpgn out.lpgn         ;Fix Lichess names and add ratings"},
     {tabiya,             4,  "y in.lpgn out.lpgn                     ;Find Tabiyas in file"},
     {get_name_fide_id,   4,  "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file"},
-    {propogate,          7,  "propogate manual-fide-ids.txt nat-fide-ids.txt fide-ids.txt in.lpgn id-players.txt   ;Get player name frequency plus FIDE-ids"},
+    {propogate,          8,  "propogate manual-fide-ids.txt nat-fide-ids.txt fide-ids.txt in.lpgn out.lpgn report.txt"},
     {lichess_broadcast_improve,4,"lbi in.lpgn out.lpgn                  ;Lichess broadcast improve"},          
     {put_name_fide_id,   5,  "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file"},
     {bulk_out_skeleton,  5,  "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton"},
@@ -123,6 +123,7 @@ int main( int argc, const char **argv )
         "c:/users/bill/documents/chess/nzl/2025/nz-fide-id-combined.txt",
         "c:/users/bill/documents/chess/nzl/2025/fide-ids-combined-2025.txt",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024.lpgn",
+        "c:/users/bill/documents/chess/nzl/2025/nzl2024-out.lpgn",
         "c:/users/bill/documents/chess/nzl/2025/player-details-fide-2024.txt"
     };
     argc = sizeof(args)/sizeof(args[0]);
@@ -281,7 +282,14 @@ int main( int argc, const char **argv )
                         printf( "Error; Cannot open file %s for reading\n", fin_aux3.c_str() );
                         return -1;
                     }
-                    return cmd_propogate( in_aux, in_aux2, in_aux3, in, out );
+                    std::string fout_report(argv[7]);
+                    std::ofstream out_report(fout_report.c_str());
+                    if( !out_report )
+                    {
+                        printf( "Error; Cannot open file %s for writing\n", fout_report.c_str() );
+                        return -1;
+                    }
+                    return cmd_propogate( in_aux, in_aux2, in_aux3, in, out, out_report );
                     break;
                 }
             }
