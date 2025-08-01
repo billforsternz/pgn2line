@@ -1428,8 +1428,10 @@ struct Triple
 enum NameMatchTier
 {
     TIER_NULL=0,
+    TIER_DOES_NOT_HAVE_ID,
     TIER_HAS_ID,
     TIER_NATIVE,
+    TIER_MANUAL,
     TIER_NATIONAL_A,
     TIER_NATIONAL_B,
     TIER_NATIONAL_C,
@@ -1448,8 +1450,10 @@ enum NameMatchTier
 static const char *tier_txt[] =
 {
     "no fide-id present or inferred",
+    "no fide-id explicitly specified manually",
     "player has fide-id in this game",
     "player has fide-id in other games",
+    "Manual adjustment",
     "LOCAL complete name match",
     "LOCAL case insensitive match",
     "LOCAL case insensitive match after removing period",
@@ -1476,10 +1480,7 @@ struct PlayerDetails
     std::set<long> other_ids;
     bool operator < (const PlayerDetails &lhs ) { return nbr_games < lhs.nbr_games; }
     NameMatchTier match_tier = TIER_NULL;
-                          // 0=not matched, 2=has fide_id games, 3,4,5,6,7,8 = NZCF matches
-                          //                                     9,10,11,12,13,14 = FIDE matches   
-                          // 1 is reserved for actual FIDE ID present in a game (rather than PlayerDetails)
-    Triple match;         // inferred (>=3) match
+    Triple match;         // for inferred (look up in name lists match)
 };
 
 struct NameSplit
@@ -1556,7 +1557,6 @@ void split_name( const std::string &name, NameSplit &out )
     }
 }    
 
-
 struct NameMaps
 {
     std::map<std::string,Triple> map_name;
@@ -1567,28 +1567,30 @@ struct NameMaps
     std::map<std::string,Triple> map_surname_initial;
 };
 
-int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_fide, std::ifstream &in, std::ofstream &out )
+int cmd_get_name_fide_id_plus( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std::ifstream &in_aux_fide, std::ifstream &in, std::ofstream &out )
 {
 
     // Stage 1:
     // 
-    // Read the NZ fide ids.
+    // Read the NZ fide ids from fide id lists
     //  Split each name into a few (N) name forms
     //  Create N maps named map_ mapping all name form instances to the original name plus id (plus unhelpful but possible collision count)
     //
+    NameMaps nm_manual;
     NameMaps nm_nzcf;
     NameMaps nm_fide;
-    for( int fed=0; fed<2; fed++) {
+    for( int fed=0; fed<3; fed++) {
+        int nbr_manual_players = 0;
         int nbr_nzcf_players = 0;
         int nbr_fide_players = 0;
-        int *nbr_players     = (fed==0 ? &nbr_nzcf_players : &nbr_nzcf_players);
-        const char *fed_name = (fed==0 ? "NZCF" : "FIDE" );
-        NameMaps &fmaps       = (fed==0 ? nm_nzcf : nm_fide );
+        int *nbr_players     = fed==0 ? &nbr_manual_players : (fed==1 ? &nbr_nzcf_players : &nbr_nzcf_players);
+        const char *fed_name = fed==0 ? "Manual"            : (fed==1 ? "NZCF" : "FIDE");
+        NameMaps &fmaps      = fed==0 ? nm_manual           : (fed==1 ? nm_nzcf : nm_fide );
         std::string line;
         int line_nbr=0;
         for(;;)
         {
-            std::ifstream &in_aux = (fed==0? in_aux_loc : in_aux_fide);
+            std::ifstream &in_aux = fed==0 ? in_aux_manual : (fed==1 ? in_aux_loc : in_aux_fide);
             if( !std::getline(in_aux, line) )
                 break;
 
@@ -1794,9 +1796,10 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
     // 
     // Try to match the player names from players to the map_ name forms from the NZ and FIDE fide id files
     //
-    for( int fed=0; fed<2; fed++)
+    for( int fed=0; fed<3; fed++)
     {
-        NameMaps &fmaps = (fed==0 ? nm_nzcf : nm_fide );
+        NameMaps &fmaps = fed==0 ? nm_manual : (fed==1 ? nm_nzcf : nm_fide );
+        bool manual = (fed==0); // shoehorn in the manual file first
         for( PlayerDetails pd2: v )
         {
             auto jt = players.find(pd2.name);
@@ -1807,14 +1810,14 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
             }
             PlayerDetails &pd = jt->second;
             if( pd.match_tier != TIER_NULL )
-                continue;
+                continue;   // Player dealt with in an earlier file. One and done.
             if( pd.nbr_games_with_id!=0 && pd.nbr_games_with_other_ids==0 )
-                pd.match_tier = TIER_NATIVE;
+                pd.match_tier = TIER_NATIVE;    // first time through only
             else
             {
                 NameSplit ns;
                 split_name( pd.name, ns );
-                for( int infer=1; infer<=6; infer++ )
+                for( int infer=1; infer<=(manual?1:6); infer++ )    // for manual file - only exact matches
                 {
                     std::map<std::string,Triple> *p = &fmaps.map_name;                    
                     std::string q;
@@ -1863,10 +1866,21 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
                             {
                                 if( it->second.count == 1 ) // collisions are poison
                                 {
-                                    int tier = (fed == 0 ? (int)TIER_NATIONAL_A : (int)TIER_FIDE_A);
-                                    tier = tier-1+infer;
-                                    pd.match_tier = (NameMatchTier)tier;
                                     pd.match = it->second;
+                                    if( manual )
+                                    {
+                                        // Special feature of manual file - fide-id == 1 is a proxy for specifically
+                                        //  saying player does not have a fide-id, eg Cecil Purdy (useful for filtering
+                                        //  out someone early - useful if their name might be more likely to yield false
+                                        //  positives than Cecil Purdy)
+                                        pd.match_tier = pd.match.id == 1 ? TIER_DOES_NOT_HAVE_ID : TIER_MANUAL;
+                                    }
+                                    else
+                                    {
+                                        int tier = (fed == 1 ? (int)TIER_NATIONAL_A : (int)TIER_FIDE_A);
+                                        tier = tier-1+infer;
+                                        pd.match_tier = (NameMatchTier)tier;
+                                    }
                                 }
                             }
                             break;
@@ -1891,11 +1905,11 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
         }
         PlayerDetails &pd = jt->second;
         std::string line = util::sprintf("%-30s", pd.name.c_str() );
-        if( pd.match_tier == TIER_NULL )
+        if( pd.match_tier <= TIER_DOES_NOT_HAVE_ID )
             line += util::sprintf("%9s"," " );
         else
         {
-            long id = (pd.match_tier < TIER_NATIONAL_A ? pd.id : pd.match.id);
+            long id = (pd.match_tier < TIER_MANUAL ? pd.id : pd.match.id);
             line += util::sprintf( "%9ld", id );
         }
         line += util::sprintf("  %d game%s",
@@ -2007,7 +2021,7 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
                 }
 
                 // Increment this tier and all weaker tiers
-                if( match_tier != TIER_NULL )
+                if( match_tier > TIER_DOES_NOT_HAVE_ID )
                 {
                     for( int i=match_tier; i<NBR_TIERS; i++ )
                         nbr_fide_ids_in_game[i]++;
@@ -2026,7 +2040,7 @@ int cmd_get_name_fide_id_plus( std::ifstream &in_aux_loc, std::ifstream &in_aux_
     }
 
     // Number of games with 0, 1 or 2 fide-ids once matches from each tier are included
-    for( int i=1; i<NBR_TIERS; i++ )
+    for( int i=2; i<NBR_TIERS; i++ )
     {
         printf( "Number of games with 0, 1 or 2 fide-ids if we include name matches up to tier: %s.\n", tier_txt[i] );
         printf( " 0: %d, %.1f percent\n", nbr_games_0[i],

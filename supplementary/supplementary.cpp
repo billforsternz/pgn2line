@@ -93,7 +93,7 @@ static COMMAND table[] =
     {add_ratings,        5,  "r ratings.txt in.lpgn out.lpgn         ;Fix Lichess names and add ratings"},
     {tabiya,             4,  "y in.lpgn out.lpgn                     ;Find Tabiyas in file"},
     {get_name_fide_id,   4,  "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file"},
-    {get_name_fide_id_plus,    6,"gfp nz-fide-ids.txt fide-ids.txt in.lpgn id-players.txt   ;Get player name frequency plus FIDE-ids"},
+    {get_name_fide_id_plus,    7,"gfp manual-fide-ids.txt nat-fide-ids.txt fide-ids.txt in.lpgn id-players.txt   ;Get player name frequency plus FIDE-ids"},
     {lichess_broadcast_improve,4,"lbi in.lpgn out.lpgn                  ;Lichess broadcast improve"},          
     {put_name_fide_id,   5,  "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file"},
     {bulk_out_skeleton,  5,  "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton"},
@@ -119,6 +119,7 @@ int main( int argc, const char **argv )
     {
         "dont-care.exe",
         "gfp",
+        "c:/users/bill/documents/chess/nzl/2025/manual-fide-id-adjustments.txt",
         "c:/users/bill/documents/chess/nzl/2025/nz-fide-id-combined.txt",
         "c:/users/bill/documents/chess/nzl/2025/fide-ids-combined-2025.txt",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024.lpgn",
@@ -185,7 +186,7 @@ int main( int argc, const char **argv )
             argi_input_file = 3;
             break;
         case get_name_fide_id_plus:
-            argi_input_file = 4;
+            argi_input_file = 5;
     }
 
     // Open main input and output files
@@ -273,7 +274,14 @@ int main( int argc, const char **argv )
                         printf( "Error; Cannot open file %s for reading\n", fin_aux2.c_str() );
                         return -1;
                     }
-                    return cmd_get_name_fide_id_plus( in_aux, in_aux2, in, out );
+                    std::string fin_aux3(argv[4]);
+                    std::ifstream in_aux3(fin_aux3.c_str());
+                    if( !in_aux3 )
+                    {
+                        printf( "Error; Cannot open file %s for reading\n", fin_aux3.c_str() );
+                        return -1;
+                    }
+                    return cmd_get_name_fide_id_plus( in_aux, in_aux2, in_aux3, in, out );
                     break;
                 }
             }
