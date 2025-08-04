@@ -98,8 +98,8 @@ static COMMAND table[] =
     {put_name_fide_id,   5,  "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file"},
     {bulk_out_skeleton,  5,  "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton"},
     {improve,            5,  "i bulk.lpgn improve.lpgn out.lpgn      ;Replace bulk games with improved game"},
-    {remove_auto_commentary,4,"k in.lpgn out.lpgn                     ;Remove auto generated comments"},
-    {justify,            4,  "j in.lpgn out.lpgn                     ;Justify move section"},
+    {remove_auto_commentary,4,"rac in.lpgn out.lpgn                  ;Remove auto generated comments"},
+    {justify,            4,  "justify in.lpgn out.lpgn               ;Justify move section"},
     {golden,             4,  "g in.lpgn out.lpgn                     ;golden age of chess program"},
     {times,              4,  "1 in.lpgn out.lpgn                     ;adds 'Lost on time' comment"},
     {event,              5,  "2 in.lpgn out.lpgn replacement-event   ;change event name"},
@@ -114,17 +114,21 @@ static COMMAND table[] =
 
 int main( int argc, const char **argv )
 {
-#if 1 //def _DEBUG
+#if 1 // def _DEBUG
     const char *args[] =
     {
         "dont-care.exe",
+        "rac",
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/c2.lpgn",
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/d2.lpgn"
+        /*"dont-care.exe",
         "propogate",
         "c:/users/bill/documents/chess/nzl/2025/manual-fide-id-adjustments.txt",
         "c:/users/bill/documents/chess/nzl/2025/nz-fide-id-combined.txt",
         "c:/users/bill/documents/chess/nzl/2025/fide-ids-combined-2025.txt",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024.lpgn",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out.lpgn",
-        "c:/users/bill/documents/chess/nzl/2025/player-details-fide-2024.txt"
+        "c:/users/bill/documents/chess/nzl/2025/player-details-fide-2024.txt" */
     };
     argc = sizeof(args)/sizeof(args[0]);
     argv = args;

@@ -17,8 +17,8 @@ void key_update( std::string &header, const std::string key, const std::string k
 #define GET_MAIN_LINE_MASK_HAS_VARIATIONS 1
 #define GET_MAIN_LINE_MASK_HAS_COMMENTS 2
 #define GET_MAIN_LINE_MASK_ALL_COMMENTS_AUTO 4
-int get_main_line( const std::string &s, std::vector<std::string> &main_line, std::string &moves_txt, int &nbr_comments );
+int get_main_line( const std::string &s, std::vector<std::string> &main_line, std::vector<int> &clk_times, std::string &moves_txt, int &nbr_comments );
 void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &out );
-int lichess_moves_to_normal_pgn( const std::string &header, const std::string &moves, std::string &normal, int &nbr_comments );
+int lichess_moves_to_normal_pgn( const std::string &header, const std::string &moves, std::string &normal, std::string &encoded_clk_times, int &nbr_comments );
 
 #endif

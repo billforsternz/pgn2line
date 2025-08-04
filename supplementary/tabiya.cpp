@@ -178,9 +178,10 @@ static void func_tabiya_body
         for( const std::string &line: player.second )
         {
             std::vector<std::string> main_line;
+            std::vector<int> clk_times;
             int nbr_comments;
             std::string moves_txt;
-            get_main_line( line, main_line, moves_txt, nbr_comments );
+            get_main_line( line, main_line, clk_times, moves_txt, nbr_comments );
             std::vector<thc::Move> moves;
             convert_moves( main_line, moves );
             thc::ChessRules cr;
@@ -324,9 +325,10 @@ static void func_tabiya_body
         {
             
             std::vector<std::string> main_line;
+            std::vector<int> clk_times;
             int nbr_comments;
             std::string moves_txt;
-            get_main_line( game, main_line, moves_txt, nbr_comments );
+            get_main_line( game, main_line, clk_times, moves_txt, nbr_comments );
             std::vector<thc::Move> moves;
             convert_moves( main_line, moves );
             thc::ChessRules cr;

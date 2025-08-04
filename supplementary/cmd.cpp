@@ -193,13 +193,24 @@ static bool find_player( std::string name, const std::vector<PLAYER> &ratings, P
         std::string header = line.substr(0,offset);
         std::string moves  = line.substr(offset);
         std::string normal;
+        std::string encoded_clk_times;
         int nbr_comments;
-        int mask = lichess_moves_to_normal_pgn( header, moves, normal, nbr_comments );
+        int mask = lichess_moves_to_normal_pgn( header, moves, normal, encoded_clk_times, nbr_comments );
         bool has_variations = (mask & GET_MAIN_LINE_MASK_HAS_VARIATIONS) != 0;
         bool has_comments   = (mask & GET_MAIN_LINE_MASK_HAS_COMMENTS) != 0;
         bool all_comments_auto = (mask & GET_MAIN_LINE_MASK_ALL_COMMENTS_AUTO) != 0;
         total_lines++;
-        if( has_comments && all_comments_auto && nbr_comments>1 && !has_variations )
+        size_t len = encoded_clk_times.length();
+        size_t remaining = len;
+        for( int i=0; remaining>0; i++ )
+        {
+            size_t offset=0;
+            size_t chunk = remaining<65 ? remaining : 65;
+            key_update(header,util::sprintf("BabyClk%d",i+1),"Result",encoded_clk_times.substr(offset,chunk) );
+            offset += chunk;
+            remaining -= chunk;
+        }
+        if( has_comments && all_comments_auto && nbr_comments>=1 && !has_variations )
         {
             util::putline(out,header+normal);       
             fixed_lines++;
@@ -213,7 +224,7 @@ static bool find_player( std::string name, const std::vector<PLAYER> &ratings, P
     return 0;
 }
 
- int cmd_justify( std::ifstream &in, std::ofstream &out )
+int cmd_justify( std::ifstream &in, std::ofstream &out )
 {
     int line_nbr=0;
     int fixed_lines=0, total_lines=0;
@@ -397,8 +408,9 @@ int cmd_add_ratings( std::ifstream &in_aux, std::ifstream &in, std::ofstream &ou
             colour_elo = "BlackElo";
         }
         std::string normal;
+        std::string encoded_clk_times;
         int nbr_comments;
-        int mask = lichess_moves_to_normal_pgn( header, moves, normal, nbr_comments );
+        int mask = lichess_moves_to_normal_pgn( header, moves, normal, encoded_clk_times, nbr_comments );
         if( (mask & GET_MAIN_LINE_MASK_HAS_COMMENTS) && !(mask & GET_MAIN_LINE_MASK_ALL_COMMENTS_AUTO) )
         {
             printf( "Warning: removing one or more not automated comments\n");
@@ -731,8 +743,9 @@ struct GAME2
             g.replaced = false;
             g.line_nbr = line_nbr;
             std::vector<std::string> main_line;
+            std::vector<int> clk_times;
             int nbr_comments;
-            get_main_line( line, main_line, g.moves_txt, nbr_comments );
+            get_main_line( line, main_line, clk_times, g.moves_txt, nbr_comments );
             convert_moves( main_line, g.moves );
             auto it = input.find(prefix);
             bool trigger = false;
@@ -781,9 +794,10 @@ struct GAME2
             if( it != input.end() )
             {
                 std::vector<std::string> main_line;
+                std::vector<int> clk_times;
                 std::string moves_txt;
                 int nbr_comments;
-                get_main_line( line, main_line, moves_txt, nbr_comments );
+                get_main_line( line, main_line, clk_times, moves_txt, nbr_comments );
                 if( trigger )
                     printf( "moves : %s\n", moves_txt.c_str() );
                 for( GAME &g: it->second )
@@ -934,9 +948,10 @@ struct GAME2
             wb2 = white_black;
             l2 = line;
             std::vector<std::string> main_line;
+            std::vector<int> clk_times;
             std::string moves_txt;
             int nbr_comments;
-            get_main_line( line, main_line, moves_txt, nbr_comments );
+            get_main_line( line, main_line, clk_times, moves_txt, nbr_comments );
             std::string hash(wb1==wb2?"":"#");
             std::string asterisk(d1==d2?"":"*");
             std::string lessthan( main_line.size() < 20 ? // 10 whole moves
@@ -1313,7 +1328,7 @@ int cmd_lichess_broadcast_improve( std::ifstream &in, std::ofstream &out )
         std::string name;
         bool ok  = key_find( header, "Event", event );
         bool ok2 = key_find( header, "BroadcastName", name );
-        if( ok && ok2 && util::prefix(event,"Round ") )
+        if( ok && ok2 && (util::prefix(event,"Round ") || util::prefix(event,"Game ")) )
         {
             key_replace(header,"Event",name);
         }
