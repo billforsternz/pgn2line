@@ -319,14 +319,43 @@ void clk_times_encode_half( int hhmmss, int &time, std::string &out, int &durati
 //  Don't really want ] (because PGN) so use Z for that
 //
 // 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
+#define USE_25_PUNC_CODES // Simplified system, avoids some slightly annoying punctuation symbols \/'`[,
+                          //  code is simpler, slightly less compression
+
+#ifdef USE_25_PUNC_CODES
+// Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios
+// static const char *punc = "!#$%&()*+,.:;<=>?@-_{|}~";         // doesnt work
+static const char *punc = "!#$%&'()*+,-./:;<=>?@[\\Z^_`{|}~";   // works ok
+
+#else
+// 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
 static const char *punc = "!#$%&'()*+,-./:;<=>?@[\\Z^_`{|}~";
+#endif
 
 // If possible, encode durations as three characters a punctuation lead in code, then two baby codes
 bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, char &baby2 )
 {
-    bool ok = false;
+#ifdef USE_25_PUNC_CODES
+    duration1 += 60;    // offset away from negative numbers
+    duration2 += 60;
+    int idx = 0;
+    bool ok = (0 <= duration1 && duration1 < 5*60 && 0 <=duration2 && duration2 < 5*60);
+    if( ok )
+    {
+        int min1 = duration1/60;
+        int sec1 = duration1%60;
+        int min2 = duration2/60;
+        int sec2 = duration2%60;
+        idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>24
+        punc_code = punc[idx];
+        baby1 = baby_encode(sec1);
+        baby2 = baby_encode(sec2);
+    }
+    return ok;
+#else
     int base = 0;
     int idx = 0;
+    bool ok = false;
     int min1 = duration1/60;
     int sec1 = duration1%60;
     int min2 = duration2/60;
@@ -364,7 +393,7 @@ bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, ch
     else
     {
         base = 6;
-        idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>25
+        idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>24
         ok = min1<5 && min2<5;
     }
     if( ok )
@@ -374,6 +403,7 @@ bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, ch
         baby2 = baby_encode(sec2);
     }
     return ok;
+#endif
 }
 
 // Punctuation code -> idx in range 0-30
@@ -400,6 +430,16 @@ bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &d
     int seconds1 = baby_decode(baby1);
     int seconds2 = baby_decode(baby2);
 
+#ifdef USE_25_PUNC_CODES
+    // Simpler, more regular scheme
+    int min1 = idx/5;
+    int min2 = idx%5;
+    duration1 = min1*60 + seconds1;
+    duration2 = min2*60 + seconds2;
+    duration1 -= 60;    // remove the offset that avoided negative numbers
+    duration2 -= 60;
+
+#else
     // First 3 codes; duration1 is negative and duration2 is negative or 0 or 1 minutes
     if( idx < 3 )
     {
@@ -430,6 +470,7 @@ bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &d
         duration1 = min1*60 + seconds1;
         duration2 = min2*60 + seconds2;
     }
+#endif
     return ok;
 }
 
