@@ -278,7 +278,8 @@ int baby_decode( char baby )
     return val;
 }
 
-void clk_times_encode_half( int hhmmss, std::string &out, int &hh, int &mm, int &ss, int &duration )
+// Encode hhmmss against the context of the current time being time seconds
+void clk_times_encode_half( int hhmmss, int &time, std::string &out, int &duration )
 {
     out.clear();
     if( hhmmss < 0 )
@@ -286,110 +287,209 @@ void clk_times_encode_half( int hhmmss, std::string &out, int &hh, int &mm, int 
         printf( "Debug assert clk_times_encode_half()\n" );
         return;
     }
-    int h = (hhmmss>>16) & 0xff;
-    int m = (hhmmss>>8) & 0xff;
-    int s = hhmmss & 0xff;
-    if( h>9 ) h = 9;
-    if( m>59 ) m = 59;
-    if( s>59 ) s = 59;
+    int hh = (hhmmss>>16) & 0xff;
+    int mm = (hhmmss>>8) & 0xff;
+    int ss = hhmmss & 0xff;
+    if( hh>9 )  hh = 9;
+    if( mm>59 ) mm = 59;
+    if( ss>59 ) ss = 59;
 
-    // Encode hour changes only if necessary, eg start of a classical game
-    //  or a player thinks for more than an hour
-    //  or an arbiter adjusts the clock and we don't detect normal hour rollover
-    bool running = hh>0 || mm>0 || ss>0;
-    bool hour_rollover = running && m>mm && hh>0 && h==hh-1;
-    if( !hour_rollover && h != hh )
-        out += util::sprintf("Y%c", 'A'+h );
+    // Calculate duration, positive values represent declining time
+    int t2 = hh*3600 + mm*60 + ss;
+    duration = time-t2;
+
+    // Encode hour changes, this is an exception doesn't happen often
+    if( hh != (time/3600) )
+        out += util::sprintf("Y%c", 'A'+hh );
 
     // Encode minutes
-    char baby = baby_encode(m);
+    char baby = baby_encode(mm);
     out += baby;
 
     // Encode seconds
-    baby = baby_encode(s);
+    baby = baby_encode(ss);
     out += baby;
 
-    // Calculate duration
-    int t1 = hh*3600 + mm*60 + ss;
-    int t2 = h*3600 + m*60 + s;
-    duration = t1-t2 > 0 ? t1-t2 : -1;
-
-    // Update to new values
-    hh = h;
-    mm = m;
-    ss = s;
+    // Update time
+    time = t2;
 }
 
+// ASCII printables complete -> !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
+// 31 inoffensive punctuation codes in a PGN context -> !#$%&()*+,-./:;<=>?@[\Z^_`{|}~
+//  Don't really want ] (because PGN) so use Z for that
+//
+// 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
+static const char *punc = "!#$%&'()*+,-./:;<=>?@[\\Z^_`{|}~";
+
+// Calculate the punctuation code
+bool punc_encode( int duration1, int duration2, char &out )
+{
+    bool ok = false;
+    int base = 0;
+    int idx = 0;
+    int minutes1 = duration1/60;
+    int seconds1 = duration1%60;
+    int minutes2 = duration2/60;
+    int seconds2 = duration2%60;
+
+    // 3 codes; duration1 is negative and duration2 is negative or 0 minutes or 1 minutes
+    if( duration1 < 0 )
+    {
+        base = 0;
+        idx  = duration2<0 ? 0 : minutes2+1;    // 0,1 or 2
+        ok = -60 < duration1 && -60 < duration2 && duration2 < 120;
+    }
+
+    // 3 codes; duration2 is negative and duration1 is negative or 0 minutes or 1 minutes
+    else if( duration2 < 0 )
+    {
+        base = 3;
+        idx  = duration1<0 ? 0 : minutes1+1;    // 0,1 or 2
+        ok = -60 < duration2 && -60 < duration1 && duration1 < 120;
+    }
+
+    // 25 codes duration1 and duration2 both positive and less than 5 minutes
+    else
+    {
+        base = 6;
+        idx  = 5*minutes1 + minutes2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>25
+        ok = minutes1<5 && minutes2<5;
+    }
+    if( ok )
+        out = punc[base+idx];
+    return ok;
+}
+
+// Punctuation code -> idx in range 0-30
+bool punc_idx( char in, int &idx )
+{
+    idx = -1;
+    for( int i=0; punc[i]; i++ )
+    {
+        if( punc[i] == in )
+        {
+            idx = i;
+            break;
+        }
+    }
+    return idx >= 0;
+}
+
+// Decode duration coding
+bool punc_decode( char in, int seconds1, int seconds2, int &duration1, int &duration2 )
+{
+    int idx = -1;
+    bool ok = punc_idx( in, idx );
+    if( !ok ) return false;
+
+    // 3 codes; duration1 is negative and duration2 is negative or 0 or 1 minutes
+    if( idx < 3 )
+    {
+        duration1 = 0-seconds1;
+        if( idx == 0 )
+            duration2 = 0-seconds2;
+        else
+            duration2 = (idx-1)*60 + seconds2;
+    }
+
+    // 3 codes; duration2 is negative and duration1 is negative or 0 or 1 minutes
+    else if( idx < 6 )
+    {
+        idx -= 3;
+        duration2 = 0-seconds2;
+        if( idx == 0 )
+            duration1 = 0-seconds1;
+        else
+            duration1 = (idx-1)*60 + seconds1;
+    }
+
+    // 25 codes duration1 and duration2 both positive and less than 5 minutes
+    else
+    {
+        idx -= 6;
+        int min1 = idx/5;
+        int min2 = idx%5;
+        duration1 = min1*60 + seconds1;
+        duration2 = min2*60 + seconds2;
+    }
+    return ok;
+}
+
+bool clk_times_encode_by_duration( int duration1, int duration2, std::string &emit_duration )
+{
+    char punc_code;
+    bool ok = punc_encode( duration1, duration2, punc_code );
+    if( ok )
+    {
+        int sec1 = duration1%60;
+        int sec2 = duration2%60;
+        if( duration1 < 0 )
+            sec1 = 0-duration1; // +ve number 0-59, don't mess with % operator on negative numbers
+        if( duration2 < 0 )
+            sec2 = 0-duration2; // +ve number 0-59, don't mess with % operator on negative numbers
+        emit_duration = util::sprintf( "%c%c%c", punc_code, baby_encode(sec1), baby_encode(sec2) );
+    }
+    return ok;
+}
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
 //  Babylonian (base-60) clock times 
 void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_clk_times )
 {
+    printf("\nclk_times_encode()\n" );
     encoded_clk_times.clear();
-    int whour=0, wmin=0, wsec=0;    
-    int bhour=0, bmin=0, bsec=0;
+    int time1 = 5400;   // start times is 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
+    int time2 = 5400;
 
     int len = (int) clk_times.size();
-    for( int i=0; i<len; i+=2 )
+    for( int i=0; i<len; i++ )
     {
         int hhmmss = clk_times[i];
         std::string emit1;
         std::string emit2;
+        std::string emit_duration;
         int duration1, duration2;
-        clk_times_encode_half( hhmmss, emit1, whour, wmin, wsec, duration1 );
 
-        // If we don't have a second half, write this one out we can't do pair
-        //  optimisations at a ragged end
+        // Encode first half
+        clk_times_encode_half( hhmmss, time1, emit1, duration1 );
+
+        // If we don't have a second half, write this one out
         if( i+1 >= len )
         {
             encoded_clk_times += emit1;
+            printf( "ragged %06x %s\n", hhmmss, emit1.c_str() );
             continue;
         }
 
-        // Encode a second half, initially without optimisations
-        hhmmss = clk_times[i+1];
-        clk_times_encode_half( hhmmss, emit2, bhour, bmin, bsec, duration2 );
+        // Encode a second half
+        int hhmmss2 = clk_times[++i];    // ++i to do two array values per iteration of the loop
+        clk_times_encode_half( hhmmss2, time2, emit2, duration2 );
 
-        // Start optimisation phase
-        bool zcode_is_possible = true;
+        // Do duration coding if possible
+        bool duration_coding = clk_times_encode_by_duration( duration1, duration2, emit_duration );
+        if( duration_coding )
+        {
+
+            // Note that duration encoding also updates the hour
+            encoded_clk_times += emit_duration;
+            printf( "duration %06x %06x %d %d %s\n", hhmmss, hhmmss2, duration1, duration2, emit_duration.c_str() );
+            continue;
+        }
 
         // Changing both hours at once routinely happens at the start of a
         //  classical game (change both hours from 0 -> 1), so it's worth
         //  a little optimisation
-        if( emit1[0]=='Y' && emit2[0]=='Y' )        
+        if( emit1[0]=='Y' && emit2[0]=='Y' && (emit1[1] == emit2[1]) )
         {
-            if( emit1[1] != emit2[1] )
-            {
-                // Changing both hours at once to different values ruins all hope
-                //  of optimisation (it's rather unlikely, to say the least,
-                //  but we still handle it smoothly)
-                zcode_is_possible = false;
-            }
-            else
-            {
-                // Optimisation 1), change matching "YA" "YA" (say) for both sides to "Y1" for both
-                emit1[1] = emit1[1] - 'A' + '1';     // z coding remains possible
-                emit2 = emit2.substr(2);
-            }
-        }
 
-        // Optimisation 2), replace mm,ss,mm,ss quartet with 'Z',dd,dd where dd = delta
-        //  in seconds, if both deltas were <60 seconds
-        if( zcode_is_possible && 0<=duration1 && duration1<60 && 0<=duration2 && duration2<60 )
-        {
-            if( emit1[0] == 'Y' )
-                encoded_clk_times += emit1.substr(0,2);
-            encoded_clk_times += 'Z';
-            char baby = baby_encode(duration1);
-            encoded_clk_times += baby;
-            baby = baby_encode(duration2);
-            encoded_clk_times += baby;
+            // change matching "YA" "YA" (say) for both sides to "Y1" for both
+            emit1[1] = emit1[1] - 'A' + '1';     // z coding remains possible
+            emit2 = emit2.substr(2);
         }
-        else
-        {
-            encoded_clk_times += emit1;
-            encoded_clk_times += emit2;
-        }
+        encoded_clk_times += emit1;
+        printf( "player1 %06x %s\n", hhmmss, emit1.c_str() );
+        encoded_clk_times += emit2;
+        printf( "player2 %06x %s\n", hhmmss2, emit2.c_str() );
     }
 }
 
@@ -398,122 +498,138 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
 //  For now the reverse procedure is a test only
 void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &clk_times )
 {
-    int whour=0, wmin=0, wsec=0;    
-    int bhour=0, bmin=0, bsec=0;
-    int state=0, save_state;
+    enum {hour1,hour2,minute1,second1,minute2,second2,duration1,duration2} state=minute1;
+    int time1 = 5400;   // start times is 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
+    int time2 = 5400;
+    int hh1   = time1 / 3600;
+    int mm1   = (time1 - 3600*hh1) / 60;
+    int ss1   = time1 % 60;
+    int hh2   = time2 / 3600;
+    int mm2   = (time2 - 3600*hh2) / 60;
+    int ss2   = time2 % 60;
+    int dd1, dd2;
+    char punc_code;
+    printf("\nclk_times_decode()\n" );
     for( char c: encoded_clk_times )
     {
-        bool emit=false;
+        printf("%c", c );
         switch(state)
         {
             default:
-            case 0:
-            case 1:
-            case 2:
-            case 3:
+            case minute1:
+            case minute2:
             {
+                bool first = (state==minute1);
+                int idx;
                 if( c == 'Y' )
+                    state = (first?hour1:hour2);
+                else if( first && punc_idx(c,idx) )
                 {
-                    save_state = state;
-                    state = 4;
-                }
-                else if( c=='Z' )
-                {
-                    state = 5;
+                    punc_code = c;
+                    state = duration1;
                 }
                 else
                 {
-                    int val = baby_decode(c);
-                    switch( state )
-                    {
-                        case 0: if( val > wmin )
-                                    whour--;
-                                wmin = val;    break;
-                        case 1: wsec = val;    break;
-                        case 2: if( val > bmin )
-                                    bhour--;
-                                bmin = val;    break;
-                        case 3: bsec = val;    break;
-                    }
-                    state++;
-                    if( state > 3 )
-                    {
-                        emit = true;
-                        state = 0;
-                    }
+                    int mm = baby_decode(c);
+                    if( first )
+                        mm1 = mm;
+                    else
+                        mm2 = mm;
+                    state = (first?second1:second2);
                 }
                 break;
             }
-            case 4:
+            case second1:
             {
+                ss1 = baby_decode(c);
+                state = minute2;
+                int hhmmss=0;
+                hhmmss =  ( ss1      &     0xff);
+                hhmmss |= ((mm1<<8)  &   0xff00);
+                hhmmss |= ((hh1<<16) & 0xff0000);
+                printf( " %06x\n", hhmmss );
+                clk_times.push_back(hhmmss);
+                time1 = hh1*3600 + mm1*60 + ss1;
+                break;
+            }
+            case second2:
+            {
+                ss2 = baby_decode(c);
+                state = minute1;
+                int hhmmss=0;
+                hhmmss =  ( ss2      &     0xff);
+                hhmmss |= ((mm2<<8)  &   0xff00);
+                hhmmss |= ((hh2<<16) & 0xff0000);
+                printf( " %06x\n", hhmmss );
+                clk_times.push_back(hhmmss);
+                time2 = hh2*3600 + mm2*60 + ss2;
+                break;
+            }
+            case hour1:
+            case hour2:
+            {
+                bool first = (state==hour1);
                 if( '0'<= c && c<='9' )
-                    whour = bhour = c-'0';
+                {
+                    hh1 = hh2 = c-'0';
+                    printf( " hour (both) %d ", hh1 );
+                }
                 else
                 {
-                    if( save_state == 0 )
-                        whour = c-'A';
-                    else
-                        bhour = c-'A';
-                }
-                state = save_state;
-                break;
-            }
-            case 5:
-            case 6:
-            {
-                int duration = baby_decode(c);
-                int &h = (state==5 ? whour : bhour);
-                int &m = (state==5 ? wmin  : bmin );
-                int &s = (state==5 ? wsec  : bsec );
-                int remaining = duration;
-                int chunk = (s>=remaining ? remaining : s);
-                s -= chunk;
-                remaining -= chunk;
-                if( remaining > 0 )
-                {
-                    s = 60-remaining;
-                    if( m > 0 )
-                        m--;
+                    if( first )
+                    {
+                        hh1 = c-'A';
+                        printf( " hour1 %d ", hh1 );
+                    }
                     else
                     {
-                        if( h > 0 )
-                        {
-                            h--;
-                            m = 59;
-                        }
+                        hh2 = c-'A';
+                        printf( " hour2 %d ", hh2 );
                     }
                 }
-                state++;
-                if( state > 6 )
-                {
-                    state = 0;
-                    emit = true;
-                }
+                state = first?minute1:minute2;
+                break;
+            }
+            case duration1:
+            {
+                dd1 = baby_decode(c);
+                state = duration2;
+                break;
+            }
+            case duration2:
+            {
+                dd2 = baby_decode(c);
+                state = minute1;
+                int duration1, duration2;
+                punc_decode(punc_code,dd1,dd2,duration1,duration2);
+                printf( " %d %d", duration1, duration2 );
+                time1 -= duration1;
+                if( time1 < 0 )
+                    time1 = 0;
+                hh1 = time1 / 3600;
+                mm1 = (time1 - 3600*hh1) / 60;
+                ss1 = time1 % 60;
+                int hhmmss=0;
+                hhmmss =  ( ss1      &     0xff);
+                hhmmss |= ((mm1<<8)  &   0xff00);
+                hhmmss |= ((hh1<<16) & 0xff0000);
+                printf( " %06x", hhmmss );
+                clk_times.push_back(hhmmss);
+                time2 -= duration2;
+                if( time2 < 0 )
+                    time2 = 0;
+                hh2 = time2 / 3600;
+                mm2 = (time2 - 3600*hh2) / 60;
+                ss2 = time2 % 60;
+                hhmmss=0;
+                hhmmss =  ( ss2      &     0xff);
+                hhmmss |= ((mm2<<8)  &   0xff00);
+                hhmmss |= ((hh2<<16) & 0xff0000);
+                printf( " %06x\n", hhmmss );
+                clk_times.push_back(hhmmss);
                 break;
             }
         }
-        if( emit )
-        {
-            if( whour > 1 ) printf( "Assert whour=%d\n", whour );
-            int hhmmss=0;
-            hhmmss =  ( wsec       &     0xff);
-            hhmmss |= ((wmin<<8)   &   0xff00);
-            hhmmss |= ((whour<<16) & 0xff0000);
-            clk_times.push_back(hhmmss);
-            if( bhour > 1 ) printf( "Assert bhour=%d\n", bhour );
-            hhmmss =  ( bsec       &     0xff);
-            hhmmss |= ((bmin<<8)   &   0xff00);
-            hhmmss |= ((bhour<<16) & 0xff0000);
-            clk_times.push_back(hhmmss);
-        }
-    }
-    if( state == 2 )    // ragged end?
-    {
-        int hhmmss=0;
-        hhmmss =  ( wsec       &     0xff);
-        hhmmss |= ((wmin<<8)   &   0xff00);
-        hhmmss |= ((whour<<16) & 0xff0000);
-        clk_times.push_back(hhmmss);
     }
 }
 
@@ -530,8 +646,8 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
         clk_times_decode( encoded_clk_times, temp );
         if( clk_times != temp )
         {
-            int len = clk_times.size();
-            int len2 = temp.size();
+            int len = (int)clk_times.size();
+            int len2 = (int)temp.size();
             printf( "BabyClk encoding test fails, whoops: %d %d %s\n", len, len2, encoded_clk_times.c_str() );
             for( int i=0; i<len && i<len2; i++ )
             {
