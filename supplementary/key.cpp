@@ -672,6 +672,27 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
     }
 }
 
+static int baby_nbr_tests_passed;
+static size_t baby_total_length;
+static int baby_nbr_tests_failed;
+static int baby_nbr_tests_aborted;
+
+std::string lichess_moves_to_normal_pgn_extra_stats()
+{
+    std::string s = util::sprintf(
+        "baby_nbr_tests_passed=%d\n"
+        "baby_total_length=%zu\n"
+        "avg=%.1f\n"
+        "baby_nbr_tests_failed=%d\n"
+        "baby_nbr_tests_aborted=%d\n",
+        baby_nbr_tests_passed,
+        baby_total_length,
+        (1.0*baby_total_length) / (1.0*(baby_nbr_tests_passed?baby_nbr_tests_passed:0)),
+        baby_nbr_tests_failed,
+        baby_nbr_tests_aborted );
+    return s;
+}
+
 int lichess_moves_to_normal_pgn( const std::string &header, const std::string &moves, std::string &normal, std::string &encoded_clk_times, int &nbr_comments )
 {
     std::vector<std::string> main_line;
@@ -683,8 +704,14 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
         clk_times_encode( clk_times, encoded_clk_times );
         std::vector<int> temp;
         clk_times_decode( encoded_clk_times, temp );
-        if( clk_times != temp )
+        if( clk_times == temp )
         {
+            baby_nbr_tests_passed++;
+            baby_total_length += encoded_clk_times.length();
+        }
+        else
+        {
+            baby_nbr_tests_failed++;
             int len = (int)clk_times.size();
             int len2 = (int)temp.size();
             printf( "BabyClk encoding test fails, whoops: %d %d %s\n", len, len2, encoded_clk_times.c_str() );
@@ -699,6 +726,7 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
     {
         if( clk_times.size() > 0 )
         {
+            baby_nbr_tests_aborted++;
             printf( "Unexpectedly cannot do BabyClk encoding %zd %zd\n",
                         main_line.size(), clk_times.size() );
         }

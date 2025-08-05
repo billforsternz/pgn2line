@@ -172,7 +172,7 @@ static bool find_player( std::string name, const std::vector<PLAYER> &ratings, P
 //  The individual command handlers
 //
 
- int cmd_remove_auto_commentary( std::ifstream &in, std::ofstream &out )
+int cmd_remove_auto_commentary( std::ifstream &in, std::ofstream &out )
 {
     int line_nbr=0;
     int fixed_lines=0, total_lines=0;
@@ -221,6 +221,9 @@ static bool find_player( std::string name, const std::vector<PLAYER> &ratings, P
         }
     }
     printf( "Normalised %u games (apparently with only automated comments) from %u total games\n", fixed_lines, total_lines );
+    std::string lichess_moves_to_normal_pgn_extra_stats();
+    std::string s = lichess_moves_to_normal_pgn_extra_stats();
+    printf( "%s\n", s.c_str() );
     return 0;
 }
 
