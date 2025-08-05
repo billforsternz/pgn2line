@@ -319,13 +319,13 @@ void clk_times_encode_half( int hhmmss, int &time, std::string &out, int &durati
 //  Don't really want ] (because PGN) so use Z for that
 //
 // 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
-#define USE_25_PUNC_CODES // Simplified system, avoids some slightly annoying punctuation symbols \/'`[,
-                          //  code is simpler, slightly less compression
+#define USE_25_PUNC_CODES // Simplified system, avoids some slightly annoying punctuation symbols \/'`[Z
+                          //  (Z is standing in for ], nice to eliminate it entirely) code is simpler,
+                          //  slightly less compression (maybe - actually tests suggest otherwise!)
 
 #ifdef USE_25_PUNC_CODES
 // Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios
-// static const char *punc = "!#$%&()*+,.:;<=>?@-_{|}~";         // doesnt work
-static const char *punc = "!#$%&'()*+,-./:;<=>?@[\\Z^_`{|}~";   // works ok
+static const char *punc = "!#$%&()*+,-.:;<=>?@^_{|}~";
 
 #else
 // 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
