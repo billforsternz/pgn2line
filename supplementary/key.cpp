@@ -321,42 +321,58 @@ void clk_times_encode_half( int hhmmss, int &time, std::string &out, int &durati
 // 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
 static const char *punc = "!#$%&'()*+,-./:;<=>?@[\\Z^_`{|}~";
 
-// Calculate the punctuation code
-bool punc_encode( int duration1, int duration2, char &out )
+// If possible, encode durations as three characters a punctuation lead in code, then two baby codes
+bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, char &baby2 )
 {
     bool ok = false;
     int base = 0;
     int idx = 0;
-    int minutes1 = duration1/60;
-    int seconds1 = duration1%60;
-    int minutes2 = duration2/60;
-    int seconds2 = duration2%60;
+    int min1 = duration1/60;
+    int sec1 = duration1%60;
+    int min2 = duration2/60;
+    int sec2 = duration2%60;
 
-    // 3 codes; duration1 is negative and duration2 is negative or 0 minutes or 1 minutes
+    // First 3 codes; duration1 is negative and duration2 is negative or 0 minutes or 1 minutes
     if( duration1 < 0 )
     {
         base = 0;
-        idx  = duration2<0 ? 0 : minutes2+1;    // 0,1 or 2
+        idx  = duration2<0 ? 0 : min2+1;    // 0,1 or 2
         ok = -60 < duration1 && -60 < duration2 && duration2 < 120;
+        if( ok )
+        {
+            sec1 = 0-duration1; // +ve number 0-59, don't mess with % operator on negative numbers
+            if( duration2 < 0 )
+                sec2 = 0-duration2; // +ve number 0-59, don't mess with % operator on negative numbers
+        }
     }
 
-    // 3 codes; duration2 is negative and duration1 is negative or 0 minutes or 1 minutes
+    // Next 3 codes; duration2 is negative and duration1 is negative or 0 minutes or 1 minutes
     else if( duration2 < 0 )
     {
         base = 3;
-        idx  = duration1<0 ? 0 : minutes1+1;    // 0,1 or 2
+        idx  = duration1<0 ? 0 : min1+1;    // 0,1 or 2
         ok = -60 < duration2 && -60 < duration1 && duration1 < 120;
+        if( ok )
+        {
+            sec2 = 0-duration2; // +ve number 0-59, don't mess with % operator on negative numbers
+            if( duration1 < 0 )
+                sec1 = 0-duration1; // +ve number 0-59, don't mess with % operator on negative numbers
+        }
     }
 
-    // 25 codes duration1 and duration2 both positive and less than 5 minutes
+    // Final 25 codes duration1 and duration2 both positive and less than 5 minutes
     else
     {
         base = 6;
-        idx  = 5*minutes1 + minutes2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>25
-        ok = minutes1<5 && minutes2<5;
+        idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>25
+        ok = min1<5 && min2<5;
     }
     if( ok )
-        out = punc[base+idx];
+    {
+        punc_code = punc[base+idx];
+        baby1 = baby_encode(sec1);
+        baby2 = baby_encode(sec2);
+    }
     return ok;
 }
 
@@ -376,13 +392,15 @@ bool punc_idx( char in, int &idx )
 }
 
 // Decode duration coding
-bool punc_decode( char in, int seconds1, int seconds2, int &duration1, int &duration2 )
+bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &duration2 )
 {
     int idx = -1;
-    bool ok = punc_idx( in, idx );
+    bool ok = punc_idx( punc_code, idx );
     if( !ok ) return false;
+    int seconds1 = baby_decode(baby1);
+    int seconds2 = baby_decode(baby2);
 
-    // 3 codes; duration1 is negative and duration2 is negative or 0 or 1 minutes
+    // First 3 codes; duration1 is negative and duration2 is negative or 0 or 1 minutes
     if( idx < 3 )
     {
         duration1 = 0-seconds1;
@@ -392,7 +410,7 @@ bool punc_decode( char in, int seconds1, int seconds2, int &duration1, int &dura
             duration2 = (idx-1)*60 + seconds2;
     }
 
-    // 3 codes; duration2 is negative and duration1 is negative or 0 or 1 minutes
+    // Next 3 codes; duration2 is negative and duration1 is negative or 0 or 1 minutes
     else if( idx < 6 )
     {
         idx -= 3;
@@ -403,7 +421,7 @@ bool punc_decode( char in, int seconds1, int seconds2, int &duration1, int &dura
             duration1 = (idx-1)*60 + seconds1;
     }
 
-    // 25 codes duration1 and duration2 both positive and less than 5 minutes
+    // Final 25 codes duration1 and duration2 both positive and less than 5 minutes
     else
     {
         idx -= 6;
@@ -415,28 +433,18 @@ bool punc_decode( char in, int seconds1, int seconds2, int &duration1, int &dura
     return ok;
 }
 
-bool clk_times_encode_by_duration( int duration1, int duration2, std::string &emit_duration )
-{
-    char punc_code;
-    bool ok = punc_encode( duration1, duration2, punc_code );
-    if( ok )
-    {
-        int sec1 = duration1%60;
-        int sec2 = duration2%60;
-        if( duration1 < 0 )
-            sec1 = 0-duration1; // +ve number 0-59, don't mess with % operator on negative numbers
-        if( duration2 < 0 )
-            sec2 = 0-duration2; // +ve number 0-59, don't mess with % operator on negative numbers
-        emit_duration = util::sprintf( "%c%c%c", punc_code, baby_encode(sec1), baby_encode(sec2) );
-    }
-    return ok;
-}
-
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
-//  Babylonian (base-60) clock times 
+//  Babylonian (base-60) clock times
+//
+// #define BABY_DEBUG
+// For debugging #define BABY_DEBUG, copy log to an editor and use column editing to line up
+// the encoder to the decoder, it's pretty cool
+//
 void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_clk_times )
 {
+    #ifdef BABY_DEBUG
     printf("\nclk_times_encode()\n" );
+    #endif
     encoded_clk_times.clear();
     int time1 = 5400;   // start times is 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
     int time2 = 5400;
@@ -457,7 +465,9 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
         if( i+1 >= len )
         {
             encoded_clk_times += emit1;
+            #ifdef BABY_DEBUG
             printf( "ragged %06x %s\n", hhmmss, emit1.c_str() );
+            #endif
             continue;
         }
 
@@ -466,18 +476,24 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
         clk_times_encode_half( hhmmss2, time2, emit2, duration2 );
 
         // Do duration coding if possible
-        bool duration_coding = clk_times_encode_by_duration( duration1, duration2, emit_duration );
+        char punc_code, baby1, baby2;
+        bool duration_coding = punc_encode( duration1, duration2, punc_code, baby1, baby2 );
         if( duration_coding )
         {
 
-            // Note that duration encoding also updates the hour
-            encoded_clk_times += emit_duration;
-            printf( "duration %06x %06x %d %d %s\n", hhmmss, hhmmss2, duration1, duration2, emit_duration.c_str() );
+            // Note that duration encoding may mean no hour updates are necessary when the
+            //  hour changes
+            encoded_clk_times += punc_code;
+            encoded_clk_times += baby1;
+            encoded_clk_times += baby2;
+            #ifdef BABY_DEBUG
+            printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss, hhmmss2, duration1, duration2, punc_code, baby1, baby2 );
+            #endif
             continue;
         }
 
         // Changing both hours at once routinely happens at the start of a
-        //  classical game (change both hours from 0 -> 1), so it's worth
+        //  rapid game say (change both hours from 1 -> 0), so it's worth
         //  a little optimisation
         if( emit1[0]=='Y' && emit2[0]=='Y' && (emit1[1] == emit2[1]) )
         {
@@ -487,9 +503,13 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
             emit2 = emit2.substr(2);
         }
         encoded_clk_times += emit1;
+        #ifdef BABY_DEBUG
         printf( "player1 %06x %s\n", hhmmss, emit1.c_str() );
+        #endif
         encoded_clk_times += emit2;
+        #ifdef BABY_DEBUG
         printf( "player2 %06x %s\n", hhmmss2, emit2.c_str() );
+        #endif
     }
 }
 
@@ -507,12 +527,15 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
     int hh2   = time2 / 3600;
     int mm2   = (time2 - 3600*hh2) / 60;
     int ss2   = time2 % 60;
-    int dd1, dd2;
-    char punc_code;
+    char punc_code, baby1, baby2;
+    #ifdef BABY_DEBUG
     printf("\nclk_times_decode()\n" );
+    #endif
     for( char c: encoded_clk_times )
     {
+        #ifdef BABY_DEBUG
         printf("%c", c );
+        #endif
         switch(state)
         {
             default:
@@ -547,7 +570,9 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                 hhmmss =  ( ss1      &     0xff);
                 hhmmss |= ((mm1<<8)  &   0xff00);
                 hhmmss |= ((hh1<<16) & 0xff0000);
+                #ifdef BABY_DEBUG
                 printf( " %06x\n", hhmmss );
+                #endif
                 clk_times.push_back(hhmmss);
                 time1 = hh1*3600 + mm1*60 + ss1;
                 break;
@@ -560,7 +585,9 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                 hhmmss =  ( ss2      &     0xff);
                 hhmmss |= ((mm2<<8)  &   0xff00);
                 hhmmss |= ((hh2<<16) & 0xff0000);
+                #ifdef BABY_DEBUG
                 printf( " %06x\n", hhmmss );
+                #endif
                 clk_times.push_back(hhmmss);
                 time2 = hh2*3600 + mm2*60 + ss2;
                 break;
@@ -572,19 +599,25 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                 if( '0'<= c && c<='9' )
                 {
                     hh1 = hh2 = c-'0';
+                    #ifdef BABY_DEBUG
                     printf( " hour (both) %d ", hh1 );
+                    #endif
                 }
                 else
                 {
                     if( first )
                     {
                         hh1 = c-'A';
+                        #ifdef BABY_DEBUG
                         printf( " hour1 %d ", hh1 );
+                        #endif
                     }
                     else
                     {
                         hh2 = c-'A';
+                        #ifdef BABY_DEBUG
                         printf( " hour2 %d ", hh2 );
+                        #endif
                     }
                 }
                 state = first?minute1:minute2;
@@ -592,17 +625,19 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
             }
             case duration1:
             {
-                dd1 = baby_decode(c);
+                baby1 = c;
                 state = duration2;
                 break;
             }
             case duration2:
             {
-                dd2 = baby_decode(c);
+                baby2 = c;
                 state = minute1;
                 int duration1, duration2;
-                punc_decode(punc_code,dd1,dd2,duration1,duration2);
+                punc_decode(punc_code,baby1,baby2,duration1,duration2);
+                #ifdef BABY_DEBUG
                 printf( " %d %d", duration1, duration2 );
+                #endif
                 time1 -= duration1;
                 if( time1 < 0 )
                     time1 = 0;
@@ -613,7 +648,9 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                 hhmmss =  ( ss1      &     0xff);
                 hhmmss |= ((mm1<<8)  &   0xff00);
                 hhmmss |= ((hh1<<16) & 0xff0000);
+                #ifdef BABY_DEBUG
                 printf( " %06x", hhmmss );
+                #endif
                 clk_times.push_back(hhmmss);
                 time2 -= duration2;
                 if( time2 < 0 )
@@ -625,7 +662,9 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                 hhmmss =  ( ss2      &     0xff);
                 hhmmss |= ((mm2<<8)  &   0xff00);
                 hhmmss |= ((hh2<<16) & 0xff0000);
+                #ifdef BABY_DEBUG
                 printf( " %06x\n", hhmmss );
+                #endif
                 clk_times.push_back(hhmmss);
                 break;
             }
