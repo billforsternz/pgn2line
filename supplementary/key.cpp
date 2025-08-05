@@ -498,8 +498,8 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
         if( emit1[0]=='Y' && emit2[0]=='Y' && (emit1[1] == emit2[1]) )
         {
 
-            // change matching "YA" "YA" (say) for both sides to "Y1" for both
-            emit1[1] = emit1[1] - 'A' + '1';     // z coding remains possible
+            // change matching "YA" "YA" (say) for both sides to "Y0" for both
+            emit1[1] = emit1[1] - 'A' + '0';     // z coding remains possible
             emit2 = emit2.substr(2);
         }
         encoded_clk_times += emit1;
@@ -688,6 +688,7 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
             int len = (int)clk_times.size();
             int len2 = (int)temp.size();
             printf( "BabyClk encoding test fails, whoops: %d %d %s\n", len, len2, encoded_clk_times.c_str() );
+            printf( "lpgn line = %s%s\n", header.c_str(), moves.c_str() );
             for( int i=0; i<len && i<len2; i++ )
             {
                 printf( "0x%06x, 0x%06x %s\n", clk_times[i], temp[i], clk_times[i]==temp[i] ? "pass" : "fail");
