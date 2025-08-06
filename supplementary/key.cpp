@@ -319,11 +319,50 @@ void clk_times_encode_half( int hhmmss, int &time, std::string &out, int &durati
 //  Don't really want ] (because PGN) so use Z for that
 //
 // 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
+// OR simpler system 25 duration codes, allows us to specify 5x5 = 25 scenarios
+#define USE_25_CODES
+#define DURATION_OFFSET 30
+#ifdef USE_25_CODES
+static const char *punc = "!#$%&()*+,-.:;<=>?@^_{|}~";  // one benefit; avoids /\"'`[] and Z
+#else
 static const char *punc = "!#$%&'()*+,-./:;<=>?@[\\Z^_`{|}~";
+#endif
+
+// Punctuation code -> idx in range 0-30
+static bool punc_idx( char in, int &idx )
+{
+    idx = -1;
+    for( int i=0; punc[i]; i++ )
+    {
+        if( punc[i] == in )
+        {
+            idx = i;
+            break;
+        }
+    }
+    return idx >= 0;
+}
 
 // If possible, encode durations as three characters a punctuation lead in code, then two baby codes
-bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, char &baby2 )
+static bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, char &baby2 )
 {
+#ifdef USE_25_CODES
+    duration1 += DURATION_OFFSET;
+    duration2 += DURATION_OFFSET;
+    bool ok = (0<=duration1 && duration1<5*60 && 0<=duration2 && duration2<5*60);
+    if( ok )
+    {
+        int min1 = duration1/60;
+        int sec1 = duration1%60;
+        int min2 = duration2/60;
+        int sec2 = duration2%60;
+        int idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 25
+        punc_code = punc[idx];
+        baby1 = baby_encode(sec1);
+        baby2 = baby_encode(sec2);
+    }
+    return ok;
+#else
     bool ok = false;
     int base = 0;
     int idx = 0;
@@ -374,26 +413,26 @@ bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, ch
         baby2 = baby_encode(sec2);
     }
     return ok;
-}
-
-// Punctuation code -> idx in range 0-30
-bool punc_idx( char in, int &idx )
-{
-    idx = -1;
-    for( int i=0; punc[i]; i++ )
-    {
-        if( punc[i] == in )
-        {
-            idx = i;
-            break;
-        }
-    }
-    return idx >= 0;
+#endif
 }
 
 // Decode duration coding
-bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &duration2 )
+static bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &duration2 )
 {
+#ifdef USE_25_CODES
+    int idx = -1;
+    bool ok = punc_idx( punc_code, idx );
+    if( !ok ) return false;
+    int seconds1 = baby_decode(baby1);
+    int seconds2 = baby_decode(baby2);
+    int min1 = idx/5;
+    int min2 = idx%5;
+    duration1 = min1*60 + seconds1;
+    duration2 = min2*60 + seconds2;
+    duration1 -= DURATION_OFFSET;
+    duration2 -= DURATION_OFFSET;
+    return ok;
+ #else
     int idx = -1;
     bool ok = punc_idx( punc_code, idx );
     if( !ok ) return false;
@@ -431,6 +470,7 @@ bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &d
         duration2 = min2*60 + seconds2;
     }
     return ok;
+#endif
 }
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
@@ -673,6 +713,7 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
 }
 
 static int baby_nbr_tests_passed;
+static size_t baby_total_moves;
 static size_t baby_total_length;
 static int baby_nbr_tests_failed;
 static int baby_nbr_tests_aborted;
@@ -681,13 +722,17 @@ std::string lichess_moves_to_normal_pgn_extra_stats()
 {
     std::string s = util::sprintf(
         "baby_nbr_tests_passed=%d\n"
+        "baby_total_moves=%zu\n"
         "baby_total_length=%zu\n"
-        "avg=%.1f\n"
+        "avg move length=%.5f\n"
+        "avg string length=%.2f\n"
         "baby_nbr_tests_failed=%d\n"
         "baby_nbr_tests_aborted=%d\n",
         baby_nbr_tests_passed,
+        baby_total_moves,
         baby_total_length,
-        (1.0*baby_total_length) / (1.0*(baby_nbr_tests_passed?baby_nbr_tests_passed:0)),
+        (1.0*baby_total_length) / (1.0*(baby_total_moves?baby_total_moves:1)),
+        (1.0*baby_total_length) / (1.0*(baby_nbr_tests_passed?baby_nbr_tests_passed:1)),
         baby_nbr_tests_failed,
         baby_nbr_tests_aborted );
     return s;
@@ -701,6 +746,7 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
     int mask = get_main_line( moves, main_line, clk_times, moves_txt, nbr_comments );
     if( main_line.size() == clk_times.size() )
     {
+        baby_total_moves += main_line.size();
         clk_times_encode( clk_times, encoded_clk_times );
         std::vector<int> temp;
         clk_times_decode( encoded_clk_times, temp );
