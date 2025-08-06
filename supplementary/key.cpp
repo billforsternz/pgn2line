@@ -108,7 +108,6 @@ void key_update( std::string &header, const std::string key, const std::string k
 //
 // Some misc utilities that deserve their own home somewhere
 //
-// #define USE_Z_FOR_FILLER
 
 void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &out )
 {
@@ -122,6 +121,12 @@ void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &
         cr.PlayMove(m);
     }
 }
+
+
+// Some BabyClk options
+#define USE_25_CODES            // simpler and actuallyy more efficient than the original 31 code system
+#define DURATION_OFFSET 30      // a refinement of the 25 code system (originally 60; 30 is better)
+#define USE_Z_FOR_FILLER        // a space saver sacrifice our best unused code to represent filler
 
 // Convert number from 0-59 to alphanumeric character
 //  I'm calling this Babylonian codes, baby codes for short (especially as the idea
@@ -158,7 +163,7 @@ int baby_decode( char baby )
 // Encode hhmmss against the context of the current time being time seconds
 bool clk_times_encode_half( int hhmmss, int &time, std::string &out, int &duration )
 {
-    bool absent = true;
+    bool filler = true;
     out.clear();
     if( hhmmss == -1 )  // absent clock time ?
     {
@@ -168,12 +173,12 @@ bool clk_times_encode_half( int hhmmss, int &time, std::string &out, int &durati
         #else
         out = "YY";     // YY = filler, represents absent clock time
         #endif
-        return absent;
+        return filler;
     }
     if( hhmmss < 0 )
     {
         printf( "Debug assert clk_times_encode_half()\n" );
-        return absent;
+        return filler;
     }
     int hh = (hhmmss>>16) & 0xff;
     int mm = (hhmmss>>8) & 0xff;
@@ -200,8 +205,8 @@ bool clk_times_encode_half( int hhmmss, int &time, std::string &out, int &durati
 
     // Update time
     time = t2;
-    absent = false;
-    return absent;
+    filler = false;
+    return filler;
 }
 
 // ASCII printables complete -> !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
@@ -210,8 +215,6 @@ bool clk_times_encode_half( int hhmmss, int &time, std::string &out, int &durati
 //
 // 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
 // OR simpler system 25 duration codes, allows us to specify 5x5 = 25 scenarios
-#define USE_25_CODES
-#define DURATION_OFFSET 30
 #ifdef USE_25_CODES
 static const char *punc = "!#$%&()*+,-.:;<=>?@^_{|}~";  // one benefit; avoids /\"'`[] and Z
 #else
@@ -389,7 +392,7 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
         int duration1, duration2;
 
         // Encode first half
-        bool absent1 = clk_times_encode_half( hhmmss, time1, emit1, duration1 );
+        bool filler1 = clk_times_encode_half( hhmmss, time1, emit1, duration1 );
 
         // If we don't have a second half, write this one out
         if( i+1 >= len )
@@ -403,11 +406,11 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
 
         // Encode a second half
         int hhmmss2 = clk_times[++i];    // ++i to do two array values per iteration of the loop
-        bool absent2 = clk_times_encode_half( hhmmss2, time2, emit2, duration2 );
+        bool filler2 = clk_times_encode_half( hhmmss2, time2, emit2, duration2 );
 
         // Do duration coding if possible
         char punc_code, baby1, baby2;
-        bool duration_coding = !absent1 && !absent2 && punc_encode( duration1, duration2, punc_code, baby1, baby2 );
+        bool duration_coding = !filler1 && !filler2 && punc_encode( duration1, duration2, punc_code, baby1, baby2 );
         if( duration_coding )
         {
 
@@ -482,7 +485,7 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                     clk_times.push_back(-1);    // Z = filler for absent clock time
                     state = first?minute2:minute1;
                 }
-                else if( c == 'Y' )
+                else if( c == 'Y' ) // still support YY even if using Z for filler
                 {
                     state = (first?hour1:hour2);
                 }
