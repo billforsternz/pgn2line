@@ -127,6 +127,7 @@ void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &
 #define USE_25_CODES            // simpler and actuallyy more efficient than the original 31 code system
 #define DURATION_OFFSET 30      // a refinement of the 25 code system (originally 60; 30 is better)
 #define USE_Z_FOR_FILLER        // a space saver sacrifice our best unused code to represent filler
+// #define BABY_DEBUG
 
 // Convert number from 0-59 to alphanumeric character
 //  I'm calling this Babylonian codes, baby codes for short (especially as the idea
@@ -158,55 +159,6 @@ int baby_decode( char baby )
     else
         val = baby-'A'+36;      // 'A'-'X' => 36-59
     return val;
-}
-
-// Encode hhmmss against the context of the current time being time seconds
-bool clk_times_encode_half( int hhmmss, int &time, std::string &out, int &duration )
-{
-    bool filler = true;
-    out.clear();
-    if( hhmmss == -1 )  // absent clock time ?
-    {
-        duration = 0;   // don't change duration, or time
-        #ifdef USE_Z_FOR_FILLER
-        out = "Z";      // Z = filler, represents absent clock time
-        #else
-        out = "YY";     // YY = filler, represents absent clock time
-        #endif
-        return filler;
-    }
-    if( hhmmss < 0 )
-    {
-        printf( "Debug assert clk_times_encode_half()\n" );
-        return filler;
-    }
-    int hh = (hhmmss>>16) & 0xff;
-    int mm = (hhmmss>>8) & 0xff;
-    int ss = hhmmss & 0xff;
-    if( hh>9 )  hh = 9;
-    if( mm>59 ) mm = 59;
-    if( ss>59 ) ss = 59;
-
-    // Calculate duration, positive values represent declining time
-    int t2 = hh*3600 + mm*60 + ss;
-    duration = time-t2;
-
-    // Encode hour changes, this is an exception doesn't happen often
-    if( hh != (time/3600) )
-        out += util::sprintf("Y%c", 'A'+hh );
-
-    // Encode minutes
-    char baby = baby_encode(mm);
-    out += baby;
-
-    // Encode seconds
-    baby = baby_encode(ss);
-    out += baby;
-
-    // Update time
-    time = t2;
-    filler = false;
-    return filler;
 }
 
 // ASCII printables complete -> !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
@@ -371,13 +323,45 @@ static bool punc_decode( char punc_code, char baby1, char baby2, int &duration1,
 #endif
 }
 
-// Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
-//  Babylonian (base-60) clock times
-//
-// #define BABY_DEBUG
-// For debugging #define BABY_DEBUG, copy log to an editor and use column editing to line up
-// the encoder to the decoder, it's pretty cool
-//
+// Encode hhmmss against the context of the current time being time seconds
+static bool clk_times_encode_half( int hhmmss, int &time, std::string &out, int &duration )
+{
+    out.clear();
+    if( hhmmss == -1 )  // absent clock time ?
+    {
+        duration = 0;   // don't change duration, or time
+        #ifdef USE_Z_FOR_FILLER
+        out = "Z";      // Z = filler, represents absent clock time
+        #else
+        out = "YY";     // YY = filler, represents absent clock time
+        #endif
+        return true;    // filler
+    }
+    int hh = (hhmmss>>16) & 0xff;
+    int mm = (hhmmss>>8) & 0xff;
+    int ss = hhmmss & 0xff;
+    if( hh>9 )  hh = 9;
+    if( mm>59 ) mm = 59;
+    if( ss>59 ) ss = 59;
+
+    // Calculate duration, positive values represent declining time
+    int t2 = hh*3600 + mm*60 + ss;
+    duration = time-t2;
+
+    // Encode hour changes, this is an exception doesn't happen often
+    if( hh != (time/3600) )
+        out += util::sprintf("Y%c", 'A'+hh );
+
+    // Encode minutes
+    char baby = baby_encode(mm);
+    out += baby;
+
+    // Encode seconds
+    baby = baby_encode(ss);
+    out += baby;
+    return false;
+}
+
 void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_clk_times )
 {
     #ifdef BABY_DEBUG
@@ -390,28 +374,32 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
     int len = (int) clk_times.size();
     for( int i=0; i<len; i++ )
     {
-        int hhmmss = clk_times[i];
+        bool more = i+1<len;
+        bool player1 = ((i&1) == 0);
+        int hhmmss1 = clk_times[i];
         std::string emit1;
         std::string emit2;
         std::string emit_duration;
         int duration1, duration2;
 
         // Encode first half
-        bool filler1 = clk_times_encode_half( hhmmss, time1, emit1, duration1 );
+        bool filler1  = player1 ? clk_times_encode_half( hhmmss1, time1, emit1, duration1 )
+                                : clk_times_encode_half( hhmmss1, time2, emit1, duration2 );
 
-        // If we don't have a second half, write this one out
-        if( i+1 >= len )
+        // If we don't have a second half, write this one out, we're done
+        if( !more )
         {
             encoded_clk_times += emit1;
             #ifdef BABY_DEBUG
-            printf( "ragged %06x %s\n", hhmmss, emit1.c_str() );
+            printf( "ragged %06x %s\n", hhmmss1, emit1.c_str() );
             #endif
             continue;
         }
 
-        // Encode a second half
-        int hhmmss2 = clk_times[++i];    // ++i to do two array values per iteration of the loop
-        bool filler2 = clk_times_encode_half( hhmmss2, time2, emit2, duration2 );
+        // Encode a provisional second half
+        int hhmmss2 = clk_times[i+1];
+        bool filler2 = player1 ? clk_times_encode_half( hhmmss2, time2, emit2, duration2 )
+                               : clk_times_encode_half( hhmmss2, time1, emit2, duration1 );
 
         // Do duration coding if possible
         char punc_code, baby1, baby2;
@@ -419,13 +407,18 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
         if( duration_coding )
         {
 
+            // Consume both
+            i++;
+            time1 -= duration1;
+            time2 -= duration2;
+
             // Note that duration encoding may mean no hour updates are necessary when the
             //  hour changes
             encoded_clk_times += punc_code;
             encoded_clk_times += baby1;
             encoded_clk_times += baby2;
             #ifdef BABY_DEBUG
-            printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss, hhmmss2, duration1, duration2, punc_code, baby1, baby2 );
+            printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss1, hhmmss2, duration1, duration2, punc_code, baby1, baby2 );
             #endif
             continue;
         }
@@ -433,24 +426,38 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
         // Changing both hours at once routinely happens at the start of a
         //  rapid game say (change both hours from 1 -> 0), so it's worth
         //  a little optimisation
-        if( emit1[0]=='Y' && emit2[0]=='Y' && emit1[1]==emit2[1] && emit1[1]!='Y' )
+        bool emit_both = (emit1[0]=='Y' && emit2[0]=='Y' && emit1[1]==emit2[1] && emit1[1]!='Y');
+        if( !emit_both )
         {
+            // Consume just 1
+            if( player1 )
+                time1 -= duration1;
+            else
+                time2 -= duration2;
+            encoded_clk_times += emit1;
+            #ifdef BABY_DEBUG
+            printf( "time%c %06x %s\n", player1?'1':'2', hhmmss1, emit1.c_str() );
+            #endif
+        }
+        else
+        {
+            // Consume both
+            i++;
+            time1 -= duration1;
+            time2 -= duration2;
 
             // change matching "YA" "YA" (say) for both sides to "Y0" for both
-            emit1[1] = emit1[1] - 'A' + '0';     // z coding remains possible
+            emit1[1] = emit1[1] - 'A' + '0';
             emit2 = emit2.substr(2);
+            encoded_clk_times += emit1;
+            encoded_clk_times += emit2;
+            #ifdef BABY_DEBUG
+            printf( "time%c %06x %s\n", player1?'1':'2', hhmmss1, emit1.c_str() );
+            printf( "time%c %06x %s\n", player1?'2':'1', hhmmss2, emit2.c_str() );
+            #endif
         }
-        encoded_clk_times += emit1;
-        #ifdef BABY_DEBUG
-        printf( "player1 %06x %s\n", hhmmss, emit1.c_str() );
-        #endif
-        encoded_clk_times += emit2;
-        #ifdef BABY_DEBUG
-        printf( "player2 %06x %s\n", hhmmss2, emit2.c_str() );
-        #endif
     }
 }
-
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
 //  Babylonian (base-60) clock times 
@@ -467,6 +474,7 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
     int mm2   = (time2 - 3600*hh2) / 60;
     int ss2   = time2 % 60;
     char punc_code, baby1, baby2;
+    bool first_save;
     #ifdef BABY_DEBUG
     printf("\nclk_times_decode()\n" );
     #endif
@@ -491,14 +499,15 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                     clk_times.push_back(-1);    // Z = filler for absent clock time
                     state = first?minute2:minute1;
                 }
-                else if( c == 'Y' ) // still support YY even if using Z for filler
+                else if( c == 'Y' )
                 {
                     state = (first?hour1:hour2);
                 }
-                else if( first && punc_idx(c,idx) )
+                else if( punc_idx(c,idx) )
                 {
                     punc_code = c;
                     state = duration1;
+                    first_save = first;
                 }
                 else
                 {
@@ -590,7 +599,7 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
             case duration2:
             {
                 baby2 = c;
-                state = minute1;
+                state = first_save?minute1:minute2;
                 int duration1, duration2;
                 punc_decode(punc_code,baby1,baby2,duration1,duration2);
                 #ifdef BABY_DEBUG
@@ -602,28 +611,28 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                 hh1 = time1 / 3600;
                 mm1 = (time1 - 3600*hh1) / 60;
                 ss1 = time1 % 60;
-                int hhmmss=0;
-                hhmmss =  ( ss1      &     0xff);
-                hhmmss |= ((mm1<<8)  &   0xff00);
-                hhmmss |= ((hh1<<16) & 0xff0000);
-                #ifdef BABY_DEBUG
-                printf( " %06x", hhmmss );
-                #endif
-                clk_times.push_back(hhmmss);
+                int hhmmss1=0;
+                hhmmss1 =  ( ss1      &     0xff);
+                hhmmss1 |= ((mm1<<8)  &   0xff00);
+                hhmmss1 |= ((hh1<<16) & 0xff0000);
                 time2 -= duration2;
                 if( time2 < 0 )
                     time2 = 0;
                 hh2 = time2 / 3600;
                 mm2 = (time2 - 3600*hh2) / 60;
                 ss2 = time2 % 60;
-                hhmmss=0;
-                hhmmss =  ( ss2      &     0xff);
-                hhmmss |= ((mm2<<8)  &   0xff00);
-                hhmmss |= ((hh2<<16) & 0xff0000);
+                int hhmmss2=0;
+                hhmmss2 =  ( ss2      &     0xff);
+                hhmmss2 |= ((mm2<<8)  &   0xff00);
+                hhmmss2 |= ((hh2<<16) & 0xff0000);
+                int &val1 = first_save ? hhmmss1 : hhmmss2;
+                int &val2 = first_save ? hhmmss2 : hhmmss1;
                 #ifdef BABY_DEBUG
-                printf( " %06x\n", hhmmss );
+                printf( " %06x ", val1 );
+                printf( " %06x\n", val2 );
                 #endif
-                clk_times.push_back(hhmmss);
+                clk_times.push_back(val1);
+                clk_times.push_back(val2);
                 break;
             }
         }
