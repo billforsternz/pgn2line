@@ -109,130 +109,6 @@ void key_update( std::string &header, const std::string key, const std::string k
 // Some misc utilities that deserve their own home somewhere
 //
 
-int get_main_line2( const std::string &s, std::vector<std::string> &main_line, std::string &moves_txt, int &nbr_comments )
-{
-    nbr_comments = 0;
-    int mask=0;
-    main_line.clear();
-    moves_txt.clear();
-	size_t offset = s.find("@M");
-	if( offset == std::string::npos )
-        return mask;
-    offset += 2;
-    int nest_depth = 0;
-    std::string move;
-    size_t len = s.length();
-    enum {in_main_line,in_move,in_variation,in_comment} state=in_main_line, old_state=in_main_line, save_state=in_main_line;
-    bool auto_comment  = false;
-    bool has_variations= false;
-    bool has_comments  = false;
-    bool only_auto_comments=true;
-    while( offset < len )
-    {
-        char c = s[offset++];
-        old_state = state;
-        switch( state )
-        {
-            case in_main_line:
-            {
-                if( c == '{' )
-                    state = in_comment;     // comments don't nest
-                else if( c == '(' )
-                {
-                    state = in_variation;
-                    has_variations=true;
-                    nest_depth = 1;        // variations do nest, so need nest depth
-                }
-                else if ( c == 'M' )
-                    ;  // @M shouldn't change state
-                else if( isascii(c) && isalpha(c) )
-                {
-                    state = in_move;
-                    move = c;
-                }
-                break;
-            }
-            case in_move:
-            {
-                if( c == '{' )
-                    state = in_comment;
-                else if( c == '(' )
-                {
-                    state = in_variation;
-                    has_variations=true;
-                    nest_depth = 1;
-                }
-                else if( !isascii(c) )
-                    state = in_main_line;
-                else if( c=='+' || c=='#' ) // Qg7#
-                {
-                    move += c;
-                    state = in_main_line;
-                }
-                else if( isalpha(c) || isdigit(c) ||
-                          c=='-' || c=='=' ) // O-O, e8=Q
-                    move += c;
-                else
-                    state = in_main_line;
-                break;
-            }
-            case in_variation:
-            {
-                if( c == '{' )
-                    state = in_comment;
-                else if( c == '(' )
-                    nest_depth++;
-                else if( c == ')' )
-                {
-                    nest_depth--;
-                    if( nest_depth == 0 )
-                        state = in_main_line;
-                }
-                // no need to parse moves in this state, wait until
-                //  we return to in_main_line state
-                break;
-            }
-            case in_comment:
-            {
-                if( c == '%' )
-                    auto_comment = true;
-                else if( c == '}' )
-                {
-                    if( !auto_comment )
-                        only_auto_comments = false;
-                    state = save_state;
-                }
-                break;
-            }
-        }
-        if( state != old_state )
-        {
-            if( state == in_comment )
-            {
-                nbr_comments++;
-                has_comments = true;
-                auto_comment = false;
-                save_state = old_state;
-            }
-            else if( old_state == in_move )
-            {
-                main_line.push_back(move);
-                moves_txt += " ";
-                moves_txt += move;
-            }
-        }
-    }
-    if( has_variations )
-        mask |= GET_MAIN_LINE_MASK_HAS_VARIATIONS;
-    if( has_comments )
-    {
-        mask |= GET_MAIN_LINE_MASK_HAS_COMMENTS;
-        if( only_auto_comments )
-            mask |= GET_MAIN_LINE_MASK_ALL_COMMENTS_AUTO;
-    }
-    return mask;
-}
-
 void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &out )
 {
     thc::ChessRules cr;
@@ -245,6 +121,12 @@ void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &
         cr.PlayMove(m);
     }
 }
+
+
+// Some BabyClk options
+#define USE_25_CODES            // simpler and actuallyy more efficient than the original 31 code system
+#define DURATION_OFFSET 30      // a refinement of the 25 code system (originally 60; 30 is better)
+#define USE_Z_FOR_FILLER        // a space saver sacrifice our best unused code to represent filler
 
 // Convert number from 0-59 to alphanumeric character
 //  I'm calling this Babylonian codes, baby codes for short (especially as the idea
@@ -279,13 +161,24 @@ int baby_decode( char baby )
 }
 
 // Encode hhmmss against the context of the current time being time seconds
-void clk_times_encode_half( int hhmmss, int &time, std::string &out, int &duration )
+bool clk_times_encode_half( int hhmmss, int &time, std::string &out, int &duration )
 {
+    bool filler = true;
     out.clear();
+    if( hhmmss == -1 )  // absent clock time ?
+    {
+        duration = 0;   // don't change duration, or time
+        #ifdef USE_Z_FOR_FILLER
+        out = "Z";      // Z = filler, represents absent clock time
+        #else
+        out = "YY";     // YY = filler, represents absent clock time
+        #endif
+        return filler;
+    }
     if( hhmmss < 0 )
     {
         printf( "Debug assert clk_times_encode_half()\n" );
-        return;
+        return filler;
     }
     int hh = (hhmmss>>16) & 0xff;
     int mm = (hhmmss>>8) & 0xff;
@@ -312,50 +205,65 @@ void clk_times_encode_half( int hhmmss, int &time, std::string &out, int &durati
 
     // Update time
     time = t2;
+    filler = false;
+    return filler;
 }
 
 // ASCII printables complete -> !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
-// 31 inoffensive punctuation codes in a PGN context -> !#$%&()*+,-./:;<=>?@[\Z^_`{|}~
-//  Don't really want ] (because PGN) so use Z for that
 //
-// 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
-#define USE_25_PUNC_CODES // Simplified system, avoids some slightly annoying punctuation symbols \/'`[Z
-                          //  (Z is standing in for ], nice to eliminate it entirely) code is simpler,
-                          //  slightly less compression (maybe - actually tests suggest otherwise!)
+// 25 inoffensive punctuation codes in a PGN context -> !#$%&()*+,-.:;<=>?@^_{|}~
+//  Avoids annoying symbols like each of -> "\/'`[]
+//  Of course '[' and ']' are only annoying in a PGN context
+//  We did have a more complicated 31 character scheme but the 25 character scheme is
+//  simpler, and more future proof (Z, ' ' and the annoying punctuation symbols might come
+//  in handy in the future).
 
-#ifdef USE_25_PUNC_CODES
-// Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios
-static const char *punc = "!#$%&()*+,-.:;<=>?@^_{|}~";
-
+// Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios, all combinations if
+//  both players durations are from -60 seconds up to 4 minutes (basically minute = -1,0,1,2,3)
+#ifdef USE_25_CODES
+static const char *punc = "!#$%&()*+,-.:;<=>?@^_{|}~";  // one benefit; avoids /\"'`[] and Z
 #else
-// 31 duration codes, allows us to specify 5x5 + 2x3 = 31 scenarios
 static const char *punc = "!#$%&'()*+,-./:;<=>?@[\\Z^_`{|}~";
 #endif
 
-// If possible, encode durations as three characters a punctuation lead in code, then two baby codes
-bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, char &baby2 )
+// Punctuation code -> idx in range 0-30
+static bool punc_idx( char in, int &idx )
 {
-#ifdef USE_25_PUNC_CODES
-    duration1 += 60;    // offset away from negative numbers
-    duration2 += 60;
-    int idx = 0;
-    bool ok = (0 <= duration1 && duration1 < 5*60 && 0 <=duration2 && duration2 < 5*60);
+    idx = -1;
+    for( int i=0; punc[i]; i++ )
+    {
+        if( punc[i] == in )
+        {
+            idx = i;
+            break;
+        }
+    }
+    return idx >= 0;
+}
+
+// If possible, encode durations as three characters a punctuation lead in code, then two baby codes
+static bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, char &baby2 )
+{
+#ifdef USE_25_CODES
+    duration1 += DURATION_OFFSET;
+    duration2 += DURATION_OFFSET;
+    bool ok = (0<=duration1 && duration1<5*60 && 0<=duration2 && duration2<5*60);
     if( ok )
     {
         int min1 = duration1/60;
         int sec1 = duration1%60;
         int min2 = duration2/60;
         int sec2 = duration2%60;
-        idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>24
+        int idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 25
         punc_code = punc[idx];
         baby1 = baby_encode(sec1);
         baby2 = baby_encode(sec2);
     }
     return ok;
 #else
+    bool ok = false;
     int base = 0;
     int idx = 0;
-    bool ok = false;
     int min1 = duration1/60;
     int sec1 = duration1%60;
     int min2 = duration2/60;
@@ -393,7 +301,7 @@ bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, ch
     else
     {
         base = 6;
-        idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>24
+        idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>25
         ok = min1<5 && min2<5;
     }
     if( ok )
@@ -406,40 +314,29 @@ bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, ch
 #endif
 }
 
-// Punctuation code -> idx in range 0-30
-bool punc_idx( char in, int &idx )
-{
-    idx = -1;
-    for( int i=0; punc[i]; i++ )
-    {
-        if( punc[i] == in )
-        {
-            idx = i;
-            break;
-        }
-    }
-    return idx >= 0;
-}
-
 // Decode duration coding
-bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &duration2 )
+static bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &duration2 )
 {
+#ifdef USE_25_CODES
+    int idx = -1;
+    bool ok = punc_idx( punc_code, idx );
+    if( !ok ) return false;
+    int seconds1 = baby_decode(baby1);
+    int seconds2 = baby_decode(baby2);
+    int min1 = idx/5;
+    int min2 = idx%5;
+    duration1 = min1*60 + seconds1;
+    duration2 = min2*60 + seconds2;
+    duration1 -= DURATION_OFFSET;
+    duration2 -= DURATION_OFFSET;
+    return ok;
+ #else
     int idx = -1;
     bool ok = punc_idx( punc_code, idx );
     if( !ok ) return false;
     int seconds1 = baby_decode(baby1);
     int seconds2 = baby_decode(baby2);
 
-#ifdef USE_25_PUNC_CODES
-    // Simpler, more regular scheme
-    int min1 = idx/5;
-    int min2 = idx%5;
-    duration1 = min1*60 + seconds1;
-    duration2 = min2*60 + seconds2;
-    duration1 -= 60;    // remove the offset that avoided negative numbers
-    duration2 -= 60;
-
-#else
     // First 3 codes; duration1 is negative and duration2 is negative or 0 or 1 minutes
     if( idx < 3 )
     {
@@ -470,8 +367,8 @@ bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &d
         duration1 = min1*60 + seconds1;
         duration2 = min2*60 + seconds2;
     }
-#endif
     return ok;
+#endif
 }
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
@@ -500,7 +397,7 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
         int duration1, duration2;
 
         // Encode first half
-        clk_times_encode_half( hhmmss, time1, emit1, duration1 );
+        bool filler1 = clk_times_encode_half( hhmmss, time1, emit1, duration1 );
 
         // If we don't have a second half, write this one out
         if( i+1 >= len )
@@ -514,11 +411,11 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
 
         // Encode a second half
         int hhmmss2 = clk_times[++i];    // ++i to do two array values per iteration of the loop
-        clk_times_encode_half( hhmmss2, time2, emit2, duration2 );
+        bool filler2 = clk_times_encode_half( hhmmss2, time2, emit2, duration2 );
 
         // Do duration coding if possible
         char punc_code, baby1, baby2;
-        bool duration_coding = punc_encode( duration1, duration2, punc_code, baby1, baby2 );
+        bool duration_coding = !filler1 && !filler2 && punc_encode( duration1, duration2, punc_code, baby1, baby2 );
         if( duration_coding )
         {
 
@@ -536,7 +433,7 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
         // Changing both hours at once routinely happens at the start of a
         //  rapid game say (change both hours from 1 -> 0), so it's worth
         //  a little optimisation
-        if( emit1[0]=='Y' && emit2[0]=='Y' && (emit1[1] == emit2[1]) )
+        if( emit1[0]=='Y' && emit2[0]=='Y' && emit1[1]==emit2[1] && emit1[1]!='Y' )
         {
 
             // change matching "YA" "YA" (say) for both sides to "Y0" for both
@@ -553,6 +450,7 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
         #endif
     }
 }
+
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
 //  Babylonian (base-60) clock times 
@@ -585,8 +483,18 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
             {
                 bool first = (state==minute1);
                 int idx;
-                if( c == 'Y' )
+                if( c == 'Z' )
+                {
+                    #ifdef BABY_DEBUG
+                    printf( " add filler\n" );
+                    #endif
+                    clk_times.push_back(-1);    // Z = filler for absent clock time
+                    state = first?minute2:minute1;
+                }
+                else if( c == 'Y' ) // still support YY even if using Z for filler
+                {
                     state = (first?hour1:hour2);
+                }
                 else if( first && punc_idx(c,idx) )
                 {
                     punc_code = c;
@@ -637,12 +545,21 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
             case hour2:
             {
                 bool first = (state==hour1);
-                if( '0'<= c && c<='9' )
+                if( c == 'Y' )
+                {
+                    #ifdef BABY_DEBUG
+                    printf( " add filler\n" );
+                    #endif
+                    clk_times.push_back(-1);    // YY = filler for absent clock time
+                    state = first?minute2:minute1;
+                }
+                else if( '0'<= c && c<='9' )
                 {
                     hh1 = hh2 = c-'0';
                     #ifdef BABY_DEBUG
                     printf( " hour (both) %d ", hh1 );
                     #endif
+                    state = first?minute1:minute2;
                 }
                 else
                 {
@@ -660,8 +577,8 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                         printf( " hour2 %d ", hh2 );
                         #endif
                     }
+                    state = first?minute1:minute2;
                 }
-                state = first?minute1:minute2;
                 break;
             }
             case duration1:
@@ -714,6 +631,7 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
 }
 
 static int baby_nbr_tests_passed;
+static size_t baby_total_moves;
 static size_t baby_total_length;
 static int baby_nbr_tests_failed;
 static int baby_nbr_tests_aborted;
@@ -722,13 +640,17 @@ std::string lichess_moves_to_normal_pgn_extra_stats()
 {
     std::string s = util::sprintf(
         "baby_nbr_tests_passed=%d\n"
+        "baby_total_moves=%zu\n"
         "baby_total_length=%zu\n"
-        "avg=%.1f\n"
+        "avg move length=%.5f\n"
+        "avg string length=%.2f\n"
         "baby_nbr_tests_failed=%d\n"
         "baby_nbr_tests_aborted=%d\n",
         baby_nbr_tests_passed,
+        baby_total_moves,
         baby_total_length,
-        (1.0*baby_total_length) / (1.0*(baby_nbr_tests_passed?baby_nbr_tests_passed:0)),
+        (1.0*baby_total_length) / (1.0*(baby_total_moves?baby_total_moves:1)),
+        (1.0*baby_total_length) / (1.0*(baby_nbr_tests_passed?baby_nbr_tests_passed:1)),
         baby_nbr_tests_failed,
         baby_nbr_tests_aborted );
     return s;
@@ -742,6 +664,7 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
     int mask = get_main_line( moves, main_line, clk_times, moves_txt, nbr_comments );
     if( main_line.size() == clk_times.size() )
     {
+        baby_total_moves += main_line.size();
         clk_times_encode( clk_times, encoded_clk_times );
         std::vector<int> temp;
         clk_times_decode( encoded_clk_times, temp );
@@ -756,7 +679,7 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
             int len = (int)clk_times.size();
             int len2 = (int)temp.size();
             printf( "BabyClk encoding test fails, whoops: %d %d %s\n", len, len2, encoded_clk_times.c_str() );
-            printf( "lpgn line = %s%s\n", header.c_str(), moves.c_str() );
+            printf( "lpgn line;\n%s%s\n", header.c_str(), moves.c_str() );
             for( int i=0; i<len && i<len2; i++ )
             {
                 printf( "0x%06x, 0x%06x %s\n", clk_times[i], temp[i], clk_times[i]==temp[i] ? "pass" : "fail");
@@ -770,6 +693,8 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
             baby_nbr_tests_aborted++;
             printf( "Unexpectedly cannot do BabyClk encoding %zd %zd\n",
                         main_line.size(), clk_times.size() );
+            if( main_line.size()==23 && clk_times.size()==22 )
+                printf( "lpgn line;\n%s%s\n", header.c_str(), moves.c_str() );
         }
     }
 
@@ -831,8 +756,6 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
     return mask;
 }
 
-
-
 int get_main_line( const std::string &s, std::vector<std::string> &main_line, std::vector<int> &clk_times, std::string &moves_txt, int &nbr_comments )
 {
     std::string comment;
@@ -853,6 +776,8 @@ int get_main_line( const std::string &s, std::vector<std::string> &main_line, st
     bool has_variations= false;
     bool has_comments  = false;
     bool only_auto_comments=true;
+    bool clk_comments = false;  // true if there are clock comments
+    int  clk_count = -1;        // add a clock value after every move
     while( offset < len )
     {
         char c = s[offset++];
@@ -918,6 +843,7 @@ int get_main_line( const std::string &s, std::vector<std::string> &main_line, st
                 //  we return to in_main_line state
                 break;
             }
+
             case in_comment:
             {
                 comment.push_back(c);
@@ -925,6 +851,7 @@ int get_main_line( const std::string &s, std::vector<std::string> &main_line, st
                     auto_comment = true;
                 else if( c == '}' )
                 {
+                    state = save_state;
                     bool lichess_inaccuracy = util::prefix(comment, " Inaccuracy");
                     bool lichess_mistake    = util::prefix(comment, " Mistake");
                     bool lichess_blunder    = util::prefix(comment, " Blunder");
@@ -982,9 +909,10 @@ int get_main_line( const std::string &s, std::vector<std::string> &main_line, st
                                 }
                             }
                             clk_times.push_back( err? -1 :hhmmss );
+                            clk_count++;
+                            clk_comments = true;
                         }
                     }
-                    state = save_state;
                 }
                 break;
             }
@@ -1001,12 +929,19 @@ int get_main_line( const std::string &s, std::vector<std::string> &main_line, st
             }
             else if( old_state == in_move )
             {
+                if( clk_count == 0 )
+                    clk_times.push_back( -1 );  // if we haven't pushed a clk time since last move
                 main_line.push_back(move);
                 moves_txt += " ";
                 moves_txt += move;
+                clk_count = 0;
             }
         }
     }
+    if( !clk_comments )
+        clk_times.clear();
+    else if( clk_count == 0 && main_line.size() == clk_times.size()+1 )
+        clk_times.push_back( -1 );  // if we haven't pushed a clk time since last move
     if( has_variations )
         mask |= GET_MAIN_LINE_MASK_HAS_VARIATIONS;
     if( has_comments )

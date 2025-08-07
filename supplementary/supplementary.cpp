@@ -114,13 +114,13 @@ static COMMAND table[] =
 
 int main( int argc, const char **argv )
 {
-#if 0 // def _DEBUG
+#if 1 // def _DEBUG
     const char *args[] =
     {
         "dont-care.exe",
         "rac",
-        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/c2a.lpgn",
-        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/d2a.lpgn"
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/b.lpgn",
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/c.lpgn"
         /*"dont-care.exe",
         "propogate",
         "c:/users/bill/documents/chess/nzl/2025/manual-fide-id-adjustments.txt",
