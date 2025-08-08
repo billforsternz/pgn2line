@@ -6,6 +6,88 @@
 #include "key.h"
 #include "lichess_utils.h"
 
+/*
+ * 
+ *  BabyClk PGN tag
+ *  ===============
+ * 
+
+The problem; Lichess (and other computer chess systems) often litter PGN chess
+documents with clock times as comments, for example {[clk 1:29:30]}.
+
+These are fantastically ugly and generally unappealing, but there's no doubt
+they hold useful information.
+
+What to do?
+
+Let's store the equivalent information safely away as a series of PGN tags that
+we don't have to look at.
+
+I have constructed a system that generates a string with some nice properties
+(only ASCII, no spaces, only well behaved punctuation characters that won't
+cause any grief [no slashes forward or back, no quotes single or double, etc.]).
+The string represents any number of clock times, about 1.6 characters are needed
+for each clock time (it's subject to a certain amount of statistical variation,
+as we will see). This is not fantastic efficiency, but it's decent and the whole
+system is hopefully easy to understand and program.
+
+Good names are hard to find, but I'm happy with my choice of BabyClk1, BabyClk2
+etc. for the PGN tags. That's right, unlike the barbarians at Lichess we are
+going respect the 80 column max specification of PGN and so the string will be
+broken up into chunks and recombined as required. The average game will need two
+or three lines in the header section.
+
+Why BabyClk? It's distinctive and short. Short is important because we want to
+keep those average number of lines down. Baby stands for Babylonian (base 60)
+maths, very much on point when it comes to our minutes and seconds (as we will
+see). Also Baby means our strings are small, get it?
+
+Now the pesky details. We have one clock comment for each main line ply. Almost.
+Sadly Lichess just omits the comment occasionally. So we have a list of moves
+(the main line of the game), and a clock time for each, with a sprinkling of
+omissions occasionally. Each clock time is of the form hh:mm:ss. I support
+hh in the range [0-9), and both mm and ss in the range [0-59) (obviously).
+
+We can model this as follows;
+
+A list of clock times, exactly one per move;
+
+[ clk0, clk1, clk2 ... clk(N-1) ]
+
+Each element is an integer value hhmmss, or -1 if the clock time for that move
+is absent. The notation hhmmss indicates hex numbers like 0x010909 for 01:09:09.
+Or 0x013b3b for 01:59:59 (extra for hex experts). We could just have well used
+simply the number of seconds 1*3600 + 59*60 + 59, it's easy to go backwards and
+forwards between number of seconds and the hh, mm, ss components (obviously).
+
+By convention the times clk0, clk2, clk4 etc. are White times. And clk1, clk3,
+clk5 etc are Black times.
+
+The White times and the Black times independently count down, but very importantly
+they are not strictly monotonically decreasing, because increment means that
+players can gain time.
+
+Our basic plan is to use two characters to encode each clock time. An important
+enhancement is that we often can encode two consecutive clock times in three
+characters. In fact we can usually do that which is why the average efficiency
+at 1.6 characters per clock time is closer to 1.5 (half of three) than 2.
+
+Conveniently, there are 62 ASCII alphanumeric characters. We use 60 of them to
+represent a minute or second value, and we reserve Y and Z for other purposes.
+I call the [0-59) encoding to the 60 alphanumerals "baby coding".
+
+So the basic plan is simply to encode each clock time as two baby codes, one
+for the mm component and one for the ss component. An additional mechanism is
+required to handle occasional changes of hour.
+
+Now consider the list [clk0, clk1, clk2.... ]. Two adjacent elements are always
+a white and black time
+
+(to be continued)
+
+*/
+
+
 
 // Some BabyClk options
 // #define BABY_DEBUG
