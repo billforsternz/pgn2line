@@ -7,24 +7,12 @@
 #include "lichess_utils.h"
 
 
-// Simplest possible txt -> chess moves conversion
-void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &out )
-{
-    thc::ChessRules cr;
-    out.clear();
-    for( std::string s: in )
-    {
-        thc::Move m;
-        m.NaturalInFast( &cr, s.c_str() );
-        out.push_back(m);
-        cr.PlayMove(m);
-    }
-}
-
 // Some BabyClk options
-#define USE_25_CODES            // simpler and actually more efficient than the original 31 code system
-#define DURATION_OFFSET 30      // a refinement of the 25 code system (originally 60; 30 is better)
 // #define BABY_DEBUG
+#define DURATION_OFFSET 30  // defines our 5 minute delta duration window as [-30,4:30) the short
+                            //  negative deltas are very useful for blitzed out moves. If two
+                            //  consecutive clk values are BOTH in the golden range we can encode
+                            //  both in 3 bytes.
 
 // Convert number from 0-59 to alphanumeric character
 //  I'm calling this Babylonian codes, baby codes for short (especially as the idea
@@ -64,18 +52,13 @@ static int baby_decode( char baby )
 //  Avoids annoying symbols like each of -> "\/'`[]
 //  Of course '[' and ']' are only annoying in a PGN context
 //  We did have a more complicated 31 character scheme but the 25 character scheme is
-//  simpler, and more future proof (Z, ' ' and the annoying punctuation symbols might come
-//  in handy in the future).
+//  simpler, and more future proof
 
-// Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios, all combinations if
-//  both players durations are from -60 seconds up to 4 minutes (basically minute = -1,0,1,2,3)
-#ifdef USE_25_CODES
+// Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios, all combinations of
+//  both players durations when they both fit in the same 5 minute window
 static const char *punc = "!#$%&()*+,-.:;<=>?@^_{|}~";  // one benefit; avoids /\"'`[] and Z
-#else
-static const char *punc = "!#$%&'()*+,-./:;<=>?@[\\Z^_`{|}~";
-#endif
 
-// Punctuation code -> idx in range 0-30
+// Punctuation code -> idx in range 0-24
 static bool punc_idx( char in, int &idx )
 {
     idx = -1;
@@ -91,133 +74,40 @@ static bool punc_idx( char in, int &idx )
 }
 
 // If possible, encode durations as three characters a punctuation lead in code, then two baby codes
-static bool punc_encode( int duration1, int duration2, char &punc_code, char &baby1, char &baby2 )
+static bool punc_encode( int duration_w, int duration_b, char &punc_code, char &baby_w, char &baby_b )
 {
-#ifdef USE_25_CODES
-    duration1 += DURATION_OFFSET;
-    duration2 += DURATION_OFFSET;
-    bool ok = (0<=duration1 && duration1<5*60 && 0<=duration2 && duration2<5*60);
+    duration_w += DURATION_OFFSET;
+    duration_b += DURATION_OFFSET;
+    bool ok = (0<=duration_w && duration_w<5*60 && 0<=duration_b && duration_b<5*60);
     if( ok )
     {
-        int min1 = duration1/60;
-        int sec1 = duration1%60;
-        int min2 = duration2/60;
-        int sec2 = duration2%60;
-        int idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 25
+        int min_w = duration_w/60;
+        int sec_w = duration_w%60;
+        int min_b = duration_b/60;
+        int sec_b = duration_b%60;
+        int idx  = 5*min_w + min_b; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 25
         punc_code = punc[idx];
-        baby1 = baby_encode(sec1);
-        baby2 = baby_encode(sec2);
+        baby_w = baby_encode(sec_w);
+        baby_b = baby_encode(sec_b);
     }
     return ok;
-#else
-    bool ok = false;
-    int base = 0;
-    int idx = 0;
-    int min1 = duration1/60;
-    int sec1 = duration1%60;
-    int min2 = duration2/60;
-    int sec2 = duration2%60;
-
-    // First 3 codes; duration1 is negative and duration2 is negative or 0 minutes or 1 minutes
-    if( duration1 < 0 )
-    {
-        base = 0;
-        idx  = duration2<0 ? 0 : min2+1;    // 0,1 or 2
-        ok = -60 < duration1 && -60 < duration2 && duration2 < 120;
-        if( ok )
-        {
-            sec1 = 0-duration1; // +ve number 0-59, don't mess with % operator on negative numbers
-            if( duration2 < 0 )
-                sec2 = 0-duration2; // +ve number 0-59, don't mess with % operator on negative numbers
-        }
-    }
-
-    // Next 3 codes; duration2 is negative and duration1 is negative or 0 minutes or 1 minutes
-    else if( duration2 < 0 )
-    {
-        base = 3;
-        idx  = duration1<0 ? 0 : min1+1;    // 0,1 or 2
-        ok = -60 < duration2 && -60 < duration1 && duration1 < 120;
-        if( ok )
-        {
-            sec2 = 0-duration2; // +ve number 0-59, don't mess with % operator on negative numbers
-            if( duration1 < 0 )
-                sec1 = 0-duration1; // +ve number 0-59, don't mess with % operator on negative numbers
-        }
-    }
-
-    // Final 25 codes duration1 and duration2 both positive and less than 5 minutes
-    else
-    {
-        base = 6;
-        idx  = 5*min1 + min2; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 =>25
-        ok = min1<5 && min2<5;
-    }
-    if( ok )
-    {
-        punc_code = punc[base+idx];
-        baby1 = baby_encode(sec1);
-        baby2 = baby_encode(sec2);
-    }
-    return ok;
-#endif
 }
 
 // Decode duration coding
-static bool punc_decode( char punc_code, char baby1, char baby2, int &duration1, int &duration2 )
+static bool punc_decode( char punc_code, char baby_w, char baby_b, int &duration_w, int &duration_b )
 {
-#ifdef USE_25_CODES
     int idx = -1;
     bool ok = punc_idx( punc_code, idx );
     if( !ok ) return false;
-    int seconds1 = baby_decode(baby1);
-    int seconds2 = baby_decode(baby2);
-    int min1 = idx/5;
-    int min2 = idx%5;
-    duration1 = min1*60 + seconds1;
-    duration2 = min2*60 + seconds2;
-    duration1 -= DURATION_OFFSET;
-    duration2 -= DURATION_OFFSET;
+    int seconds_w = baby_decode(baby_w);
+    int seconds_b = baby_decode(baby_b);
+    int min_w = idx/5;
+    int min_b = idx%5;
+    duration_w = min_w*60 + seconds_w;
+    duration_b = min_b*60 + seconds_b;
+    duration_w -= DURATION_OFFSET;
+    duration_b -= DURATION_OFFSET;
     return ok;
- #else
-    int idx = -1;
-    bool ok = punc_idx( punc_code, idx );
-    if( !ok ) return false;
-    int seconds1 = baby_decode(baby1);
-    int seconds2 = baby_decode(baby2);
-
-    // First 3 codes; duration1 is negative and duration2 is negative or 0 or 1 minutes
-    if( idx < 3 )
-    {
-        duration1 = 0-seconds1;
-        if( idx == 0 )
-            duration2 = 0-seconds2;
-        else
-            duration2 = (idx-1)*60 + seconds2;
-    }
-
-    // Next 3 codes; duration2 is negative and duration1 is negative or 0 or 1 minutes
-    else if( idx < 6 )
-    {
-        idx -= 3;
-        duration2 = 0-seconds2;
-        if( idx == 0 )
-            duration1 = 0-seconds1;
-        else
-            duration1 = (idx-1)*60 + seconds1;
-    }
-
-    // Final 25 codes duration1 and duration2 both positive and less than 5 minutes
-    else
-    {
-        idx -= 6;
-        int min1 = idx/5;
-        int min2 = idx%5;
-        duration1 = min1*60 + seconds1;
-        duration2 = min2*60 + seconds2;
-    }
-    return ok;
-#endif
 }
 
 // Split hhmmss into components and calculate duration
@@ -244,7 +134,7 @@ static void clk_times_encode_ply( bool filler, int time, int hh, int mm, int ss,
     out.clear();
     if( filler )
     {
-        out = "Z";   // filler
+        out = "Z";   // filler, sometimes no clk time is recorded for a move, just move on
         return;
     }
 
@@ -291,7 +181,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         std::string emit_abs;
         std::string emit_delta;
         int duration_w=0, duration_b=0;
-        int hh,mm,ss;
+        int hh=0,mm=0,ss=0;
 
         // Encode first half
         int &time     = white ? time_w     : time_b;
@@ -315,8 +205,8 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
                              : clk_times_calc_duration( time_w, hhmmss2, hh, mm, ss, duration_w );
 
         // Do duration coding if possible
-        char punc_code, baby1, baby2;
-        bool duration_coding = !filler1 && !filler2 && punc_encode( duration_w, duration_b, punc_code, baby1, baby2 );
+        char punc_code, baby_w, baby_b;
+        bool duration_coding = !filler1 && !filler2 && punc_encode( duration_w, duration_b, punc_code, baby_w, baby_b );
 
         // If duration coding , consume both elements
         if( duration_coding )
@@ -330,10 +220,10 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
             // Note that duration encoding may mean no hour updates are necessary when the
             //  hour changes
             encoded_clk_times += punc_code;
-            encoded_clk_times += baby1;
-            encoded_clk_times += baby2;
+            encoded_clk_times += baby_w;
+            encoded_clk_times += baby_b;
             #ifdef BABY_DEBUG
-            printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss1, hhmmss2, duration_w, duration_b, punc_code, baby1, baby2 );
+            printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss1, hhmmss2, duration_w, duration_b, punc_code, baby_w, baby_b );
             #endif
         }
 
@@ -353,12 +243,9 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
 static void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &clk_times )
 {
     enum {init,hour_initial,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_a,duration_b} state=init;
-    int hh_w=1;  // start times are 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
-    int hh_b=1;
-    int mm_w=30;
-    int mm_b=30;
-    int ss_w=0;
-    int ss_b=0;
+    int hh_w=1,  hh_b=1;  // start times are 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
+    int mm_w=30, mm_b=30;
+    int ss_w=0,  ss_b=0;
 
     // keep time in seconds, and its hh,mm,ss components in sync as state variables
     int time_w = hh_w*3600 + mm_w*60 + ss_w;
@@ -400,7 +287,8 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 }
             }
 
-            // Normal start point, expect absolute 1st baby code = minute, but also delta encoding, filler, and Y codes
+            // Normal start point, expect absolute encoding 1st baby code = minute, but also delta
+            //  encoding, filler, and Y codes
             default:
             case minute_w:
             case minute_b:
@@ -492,6 +380,8 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 #ifdef BABY_DEBUG
                 printf( " %d %d", duration_w, duration_b );
                 #endif
+
+                // Calculate updated hhmmss for white and black
                 int hhmmss_w=0;
                 int hhmmss_b=0;
                 for( int i=0; i<2; i++ )
@@ -515,7 +405,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 }
 
                 // We can now do delta encoding of (w,b) pair or (b,w) pair
-                //  if the latter then save them in that order
+                //  so if the latter make sure to save them in that order
                 int &val1 = white_save ? hhmmss_w : hhmmss_b;
                 int &val2 = white_save ? hhmmss_b : hhmmss_w;
                 #ifdef BABY_DEBUG
@@ -858,3 +748,18 @@ int get_main_line( const std::string &s, std::vector<std::string> &main_line, st
     }
     return mask;
 }
+
+// Simplest possible txt -> chess moves conversion
+void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &out )
+{
+    thc::ChessRules cr;
+    out.clear();
+    for( std::string s: in )
+    {
+        thc::Move m;
+        m.NaturalInFast( &cr, s.c_str() );
+        out.push_back(m);
+        cr.PlayMove(m);
+    }
+}
+
