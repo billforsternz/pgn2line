@@ -126,7 +126,6 @@ void convert_moves( const std::vector<std::string> &in, std::vector<thc::Move> &
 // Some BabyClk options
 #define USE_25_CODES            // simpler and actuallyy more efficient than the original 31 code system
 #define DURATION_OFFSET 30      // a refinement of the 25 code system (originally 60; 30 is better)
-#define USE_Z_FOR_FILLER        // a space saver sacrifice our best unused code to represent filler
 // #define BABY_DEBUG
 
 // Convert number from 0-59 to alphanumeric character
@@ -330,11 +329,7 @@ static bool clk_times_encode_half( int hhmmss, int &time, std::string &out, int 
     if( hhmmss == -1 )  // absent clock time ?
     {
         duration = 0;   // don't change duration, or time
-        #ifdef USE_Z_FOR_FILLER
         out = "Z";      // Z = filler, represents absent clock time
-        #else
-        out = "YY";     // YY = filler, represents absent clock time
-        #endif
         return true;    // filler
     }
     int hh = (hhmmss>>16) & 0xff;
@@ -350,7 +345,7 @@ static bool clk_times_encode_half( int hhmmss, int &time, std::string &out, int 
 
     // Encode hour changes, this is an exception doesn't happen often
     if( hh != (time/3600) )
-        out += util::sprintf("Y%c", 'A'+hh );
+        out += util::sprintf("Y%c", '0'+hh );
 
     // Encode minutes
     char baby = baby_encode(mm);
@@ -368,10 +363,17 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
     printf("\nclk_times_encode()\n" );
     #endif
     encoded_clk_times.clear();
-    int time1 = 5400;   // start times is 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
-    int time2 = 5400;
-
     int len = (int) clk_times.size();
+    int hh=1;   // default time is 1:30:00
+    if( len >= 1 && ((clk_times[0]>>16)&0xff) != hh )   // a little protocol optimisation, starting with a Y code is special ...
+    {                                                   //  ... unlike subsequent Y codes, it sets hh for both sides
+        hh = ((clk_times[0]>>16)&0xff);
+        encoded_clk_times += 'Y';
+        encoded_clk_times += ('0' + hh);
+    }
+    int time1 = hh*3600 + 30*60;        // Start time for both sides 1:30 or if modified hh:30
+    int time2 = hh*3600 + 30*60;
+
     for( int i=0; i<len; i++ )
     {
         bool more = i+1<len;
@@ -423,39 +425,15 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
             continue;
         }
 
-        // Changing both hours at once routinely happens at the start of a
-        //  rapid game say (change both hours from 1 -> 0), so it's worth
-        //  a little optimisation
-        bool emit_both = (emit1[0]=='Y' && emit2[0]=='Y' && emit1[1]==emit2[1] && emit1[1]!='Y');
-        if( !emit_both )
-        {
-            // Consume just 1
-            if( player1 )
-                time1 -= duration1;
-            else
-                time2 -= duration2;
-            encoded_clk_times += emit1;
-            #ifdef BABY_DEBUG
-            printf( "time%c %06x %s\n", player1?'1':'2', hhmmss1, emit1.c_str() );
-            #endif
-        }
-        else
-        {
-            // Consume both
-            i++;
+        // Consume just 1
+        if( player1 )
             time1 -= duration1;
+        else
             time2 -= duration2;
-
-            // change matching "YA" "YA" (say) for both sides to "Y0" for both
-            emit1[1] = emit1[1] - 'A' + '0';
-            emit2 = emit2.substr(2);
-            encoded_clk_times += emit1;
-            encoded_clk_times += emit2;
-            #ifdef BABY_DEBUG
-            printf( "time%c %06x %s\n", player1?'1':'2', hhmmss1, emit1.c_str() );
-            printf( "time%c %06x %s\n", player1?'2':'1', hhmmss2, emit2.c_str() );
-            #endif
-        }
+        encoded_clk_times += emit1;
+        #ifdef BABY_DEBUG
+        printf( "time%c %06x %s\n", player1?'1':'2', hhmmss1, emit1.c_str() );
+        #endif
     }
 }
 
@@ -464,7 +442,7 @@ void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_c
 //  For now the reverse procedure is a test only
 void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &clk_times )
 {
-    enum {hour1,hour2,minute1,second1,minute2,second2,duration1,duration2} state=minute1;
+    enum {init,hour_initial,hour1,hour2,minute1,second1,minute2,second2,duration1,duration2} state=init;
     int time1 = 5400;   // start times is 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
     int time2 = 5400;
     int hh1   = time1 / 3600;
@@ -486,6 +464,15 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
         switch(state)
         {
             default:
+            case init:
+            {
+                state = minute1; // fall through, unless ...
+                if( c == 'Y' )
+                {
+                    state = hour_initial;   // an initial Y code uniquely sets hh for both sides
+                    break;
+                }
+            }
             case minute1:
             case minute2:
             {
@@ -550,44 +537,37 @@ void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &c
                 time2 = hh2*3600 + mm2*60 + ss2;
                 break;
             }
-            case hour1:
-            case hour2:
+            case hour_initial:
             {
-                bool first = (state==hour1);
-                if( c == 'Y' )
-                {
-                    #ifdef BABY_DEBUG
-                    printf( " add filler\n" );
-                    #endif
-                    clk_times.push_back(-1);    // YY = filler for absent clock time
-                    state = first?minute2:minute1;
-                }
-                else if( '0'<= c && c<='9' )
+                if( '0'<= c && c<='9' )
                 {
                     hh1 = hh2 = c-'0';
                     #ifdef BABY_DEBUG
                     printf( " hour (both) %d ", hh1 );
                     #endif
-                    state = first?minute1:minute2;
+                }
+                state = minute1;
+                break;
+            }
+            case hour1:
+            case hour2:
+            {
+                bool first = (state==hour1);
+                if( first )
+                {
+                    hh1 = c-'0';
+                    #ifdef BABY_DEBUG
+                    printf( " hour1 %d ", hh1 );
+                    #endif
                 }
                 else
                 {
-                    if( first )
-                    {
-                        hh1 = c-'A';
-                        #ifdef BABY_DEBUG
-                        printf( " hour1 %d ", hh1 );
-                        #endif
-                    }
-                    else
-                    {
-                        hh2 = c-'A';
-                        #ifdef BABY_DEBUG
-                        printf( " hour2 %d ", hh2 );
-                        #endif
-                    }
-                    state = first?minute1:minute2;
+                    hh2 = c-'0';
+                    #ifdef BABY_DEBUG
+                    printf( " hour2 %d ", hh2 );
+                    #endif
                 }
+                state = first?minute1:minute2;
                 break;
             }
             case duration1:
@@ -679,6 +659,12 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
         clk_times_decode( encoded_clk_times, temp );
         if( clk_times == temp )
         {
+            // static int count = 20;
+            // if( count > 0 )
+            // {
+            //     count--;
+            //     printf( "%d: %s\n", 20-count, encoded_clk_times.c_str() );
+            // }
             baby_nbr_tests_passed++;
             baby_total_length += encoded_clk_times.length();
         }
