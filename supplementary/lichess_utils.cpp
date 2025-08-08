@@ -85,7 +85,7 @@ static bool punc_encode( int duration_w, int duration_b, char &punc_code, char &
         int sec_w = duration_w%60;
         int min_b = duration_b/60;
         int sec_b = duration_b%60;
-        int idx  = 5*min_w + min_b; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 25
+        int idx  = 5*min_w + min_b; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 24
         punc_code = punc[idx];
         baby_w = baby_encode(sec_w);
         baby_b = baby_encode(sec_b);
@@ -242,7 +242,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
 //  For now the reverse procedure is a test only
 static void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &clk_times )
 {
-    enum {init,hour_initial,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_a,duration_b} state=init;
+    enum {init,hour_initial,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_w,duration_b} state=init;
     int hh_w=1,  hh_b=1;  // start times are 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
     int mm_w=30, mm_b=30;
     int ss_w=0,  ss_b=0;
@@ -250,7 +250,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
     // keep time in seconds, and its hh,mm,ss components in sync as state variables
     int time_w = hh_w*3600 + mm_w*60 + ss_w;
     int time_b = time_w;
-    char punc_code, baby_a, baby_b;
+    char punc_code, baby_w, baby_b;
     bool white_save;
     #ifdef BABY_DEBUG
     printf("\nclk_times_decode()\n" );
@@ -285,6 +285,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     state = hour_initial;   // an initial Y code uniquely sets hh for both sides
                     break;
                 }
+                // Fall through don't reorder init -> minute_w -> minute_b
             }
 
             // Normal start point, expect absolute encoding 1st baby code = minute, but also delta
@@ -310,7 +311,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 else if( punc_idx(c,idx) )
                 {
                     punc_code = c;
-                    state = duration_a;
+                    state = duration_w;
                     white_save = white; // save whether duration represents a (w,b) or (b,w) pair
                 }
                 else
@@ -363,9 +364,9 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
             }
 
             // 1st baby code in delta code is always white delta
-            case duration_a:
+            case duration_w:
             {
-                baby_a = c;
+                baby_w = c;
                 state = duration_b;
                 break;
             }
@@ -375,10 +376,10 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
             {
                 baby_b = c;
                 state = white_save?minute_w:minute_b;
-                int duration_w, duration_b;
-                punc_decode(punc_code,baby_a,baby_b,duration_w,duration_b);
+                int dur_w, dur_b;
+                punc_decode(punc_code,baby_w,baby_b,dur_w,dur_b);
                 #ifdef BABY_DEBUG
-                printf( " %d %d", duration_w, duration_b );
+                printf( " %d %d", dur_w, dur_b );
                 #endif
 
                 // Calculate updated hhmmss for white and black
@@ -388,7 +389,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 {
                     bool white = (i==0);
                     int &time     = white ? time_w : time_b;
-                    int &duration = white ? duration_w : duration_b;
+                    int &duration = white ? dur_w : dur_b;
                     int &hh       = white ? hh_w : hh_b;
                     int &mm       = white ? mm_w : mm_b;
                     int &ss       = white ? ss_w : ss_b;
