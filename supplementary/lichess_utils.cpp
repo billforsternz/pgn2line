@@ -352,17 +352,19 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
 //  For now the reverse procedure is a test only
 static void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &clk_times )
 {
-    enum {init,hour_initial,hour1,hour2,minute1,second1,minute2,second2,duration_a,duration_b} state=init;
-    int time1 = 5400;   // start times is 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
-    int time2 = 5400;
-    int hh1   = time1 / 3600;
-    int mm1   = (time1 - 3600*hh1) / 60;
-    int ss1   = time1 % 60;
-    int hh2   = time2 / 3600;
-    int mm2   = (time2 - 3600*hh2) / 60;
-    int ss2   = time2 % 60;
+    enum {init,hour_initial,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_a,duration_b} state=init;
+    int hh_w=1;  // start times are 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
+    int hh_b=1;
+    int mm_w=30;
+    int mm_b=30;
+    int ss_w=0;
+    int ss_b=0;
+
+    // keep time in seconds, and its hh,mm,ss components in sync as state variables
+    int time_w = hh_w*3600 + mm_w*60 + ss_w;
+    int time_b = time_w;
     char punc_code, baby_a, baby_b;
-    bool first_save;
+    bool white_save;
     #ifdef BABY_DEBUG
     printf("\nclk_times_decode()\n" );
     #endif
@@ -373,20 +375,37 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
         #endif
         switch(state)
         {
-            default:
+
+            // Some shenanigans right at the start, decode an initial "Yn" as setting
+            //  the hour for both white and black (usually Yn sets one or the other)
+            case hour_initial:
+            {
+                if( '0'<= c && c<='9' )
+                {
+                    hh_w = hh_b = c-'0';
+                    #ifdef BABY_DEBUG
+                    printf( " hour (both) %d ", hh_w );
+                    #endif
+                }
+                state = minute_w;   // head to the normal default
+                break;
+            }
             case init:
             {
-                state = minute1; // fall through, unless ...
+                state = minute_w; // fall through, unless ...
                 if( c == 'Y' )
                 {
                     state = hour_initial;   // an initial Y code uniquely sets hh for both sides
                     break;
                 }
             }
-            case minute1:
-            case minute2:
+
+            // Normal start point, expect absolute 1st baby code = minute, but also delta encoding, filler, and Y codes
+            default:
+            case minute_w:
+            case minute_b:
             {
-                bool first = (state==minute1);
+                bool white = (state==minute_w);
                 int idx;
                 if( c == 'Z' )
                 {
@@ -394,39 +413,41 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     printf( " add filler\n" );
                     #endif
                     clk_times.push_back(-1);    // Z = filler for absent clock time
-                    state = first?minute2:minute1;
+                    state = white?minute_b:minute_w;
                 }
                 else if( c == 'Y' )
                 {
-                    state = (first?hour1:hour2);
+                    state = (white?hour_w:hour_b);
                 }
                 else if( punc_idx(c,idx) )
                 {
                     punc_code = c;
                     state = duration_a;
-                    first_save = first;
+                    white_save = white; // save whether duration represents a (w,b) or (b,w) pair
                 }
                 else
                 {
                     int mm = baby_decode(c);
-                    if( first )
-                        mm1 = mm;
+                    if( white )
+                        mm_w = mm;
                     else
-                        mm2 = mm;
-                    state = (first?second1:second2);
+                        mm_b = mm;
+                    state = (white?second_w:second_b);
                 }
                 break;
             }
-            case second1:
-            case second2:
+
+            // Get the 2nd character in absolute mode, representing seconds
+            case second_w:
+            case second_b:
             {
-                bool first = (state==second1);
-                int &hh = first ? hh1 : hh2;
-                int &mm = first ? mm1 : mm2;
-                int &ss = first ? ss1 : ss2;
-                int &time = first ? time1 : time2;
+                bool white = (state==second_w);
+                int &hh = white ? hh_w : hh_b;
+                int &mm = white ? mm_w : mm_b;
+                int &ss = white ? ss_w : ss_b;
+                int &time = white ? time_w : time_b;
                 ss = baby_decode(c);
-                state = first ? minute2 : minute1;
+                state = white ? minute_b : minute_w;
                 int hhmmss=0;
                 hhmmss =  ( ss      &     0xff);
                 hhmmss |= ((mm<<8)  &   0xff00);
@@ -438,78 +459,67 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 time = hh*3600 + mm*60 + ss;
                 break;
             }
-            case hour_initial:
+            
+            // Y code character changes the hour
+            case hour_w:
+            case hour_b:
             {
-                if( '0'<= c && c<='9' )
-                {
-                    hh1 = hh2 = c-'0';
-                    #ifdef BABY_DEBUG
-                    printf( " hour (both) %d ", hh1 );
-                    #endif
-                }
-                state = minute1;
+                bool white = (state==hour_w);
+                int &hh = white ? hh_w : hh_b;
+                hh = c-'0';
+                #ifdef BABY_DEBUG
+                printf( " hour_%c %d ", white?'w':'b' );
+                #endif
+                state = white?minute_w:minute_b;
                 break;
             }
-            case hour1:
-            case hour2:
-            {
-                bool first = (state==hour1);
-                if( first )
-                {
-                    hh1 = c-'0';
-                    #ifdef BABY_DEBUG
-                    printf( " hour1 %d ", hh1 );
-                    #endif
-                }
-                else
-                {
-                    hh2 = c-'0';
-                    #ifdef BABY_DEBUG
-                    printf( " hour2 %d ", hh2 );
-                    #endif
-                }
-                state = first?minute1:minute2;
-                break;
-            }
+
+            // 1st baby code in delta code is always white delta
             case duration_a:
             {
                 baby_a = c;
                 state = duration_b;
                 break;
             }
+
+            // 2nd and final baby code in delta code is always black delta
             case duration_b:
             {
                 baby_b = c;
-                state = first_save?minute1:minute2;
-                int duration1, duration2;
-                punc_decode(punc_code,baby_a,baby_b,duration1,duration2);
+                state = white_save?minute_w:minute_b;
+                int duration_w, duration_b;
+                punc_decode(punc_code,baby_a,baby_b,duration_w,duration_b);
                 #ifdef BABY_DEBUG
-                printf( " %d %d", duration1, duration2 );
+                printf( " %d %d", duration_w, duration_b );
                 #endif
-                time1 -= duration1;
-                if( time1 < 0 )
-                    time1 = 0;
-                hh1 = time1 / 3600;
-                mm1 = (time1 - 3600*hh1) / 60;
-                ss1 = time1 % 60;
-                int hhmmss1=0;
-                hhmmss1 =  ( ss1      &     0xff);
-                hhmmss1 |= ((mm1<<8)  &   0xff00);
-                hhmmss1 |= ((hh1<<16) & 0xff0000);
-                time2 -= duration2;
-                if( time2 < 0 )
-                    time2 = 0;
-                hh2 = time2 / 3600;
-                mm2 = (time2 - 3600*hh2) / 60;
-                ss2 = time2 % 60;
-                int hhmmss2=0;
-                hhmmss2 =  ( ss2      &     0xff);
-                hhmmss2 |= ((mm2<<8)  &   0xff00);
-                hhmmss2 |= ((hh2<<16) & 0xff0000);
-                int &val1 = first_save ? hhmmss1 : hhmmss2;
-                int &val2 = first_save ? hhmmss2 : hhmmss1;
+                int hhmmss_w=0;
+                int hhmmss_b=0;
+                for( int i=0; i<2; i++ )
+                {
+                    bool white = (i==0);
+                    int &time     = white ? time_w : time_b;
+                    int &duration = white ? duration_w : duration_b;
+                    int &hh       = white ? hh_w : hh_b;
+                    int &mm       = white ? mm_w : mm_b;
+                    int &ss       = white ? ss_w : ss_b;
+                    int &hhmmss   = white ? hhmmss_w : hhmmss_b;
+                    time -= duration;
+                    if( time < 0 )
+                        time = 0;
+                    hh = time / 3600;
+                    mm = (time - 3600*hh) / 60;
+                    ss = time % 60;
+                    hhmmss =  ( ss      &     0xff);
+                    hhmmss |= ((mm<<8)  &   0xff00);
+                    hhmmss |= ((hh<<16) & 0xff0000);
+                }
+
+                // We can now do delta encoding of (w,b) pair or (b,w) pair
+                //  if the latter then save them in that order
+                int &val1 = white_save ? hhmmss_w : hhmmss_b;
+                int &val2 = white_save ? hhmmss_b : hhmmss_w;
                 #ifdef BABY_DEBUG
-                printf( " %06x ", val1 );
+                printf( " %06x ",  val1 );
                 printf( " %06x\n", val2 );
                 #endif
                 clk_times.push_back(val1);
