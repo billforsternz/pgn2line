@@ -13,6 +13,7 @@
 #include "..\util.h"
 #include "..\thc.h"
 #include "key.h"
+#include "lichess_utils.h"
 #include "tabiya.h"
 
 //
