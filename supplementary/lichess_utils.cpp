@@ -38,7 +38,7 @@ broken up into chunks and recombined as required. The average game will need two
 or three lines in the header section.
 
 Why BabyClk? It's distinctive and short. Short is important because we want to
-keep those average number of lines down. Baby stands for Babylonian (base 60)
+keep that average number of lines down. Baby stands for Babylonian (base 60)
 maths, very much on point when it comes to our minutes and seconds (as we will
 see). Also Baby means our strings are small, get it?
 
@@ -61,7 +61,7 @@ simply the number of seconds 1*3600 + 59*60 + 59, it's easy to go backwards and
 forwards between number of seconds and the hh, mm, ss components (obviously).
 
 By convention the times clk0, clk2, clk4 etc. are White times. And clk1, clk3,
-clk5 etc are Black times.
+clk5 etc. are Black times.
 
 The White times and the Black times independently count down, but very importantly
 they are not strictly monotonically decreasing, because increment means that
@@ -74,20 +74,70 @@ at 1.6 characters per clock time is closer to 1.5 (half of three) than 2.
 
 Conveniently, there are 62 ASCII alphanumeric characters. We use 60 of them to
 represent a minute or second value, and we reserve Y and Z for other purposes.
-I call the [0-59) encoding to the 60 alphanumerals "baby coding".
+I call the [0-59) encoding of the 60 alphanumerals "baby coding".
 
 So the basic plan is simply to encode each clock time as two baby codes, one
-for the mm component and one for the ss component. An additional mechanism is
-required to handle occasional changes of hour.
+for the mm component and one for the ss component. An additional mechanism using
+letter 'Y' is used to handle occasional changes of hour. A special one character
+code 'Z' represents a missing (-1) clk time.
 
 Now consider the list [clk0, clk1, clk2.... ]. Two adjacent elements are always
-a white and black time
+a white and black time, although they might be ordered as either (white,black)
+or (black,white). In either case if both times are present (not -1) and represent
+deltas in the range of 0-5 minutes from the previous time, we encode them with
+a special three character sequence.
 
-(to be continued)
+The three character delta encoding comprises one of 25 lead in punctuation
+characters, representing all combinations of [0-5) minutes for both white and black
+then two baby codes, one for white and one for black respectively, representing the
+seconds component of the white and black delta.
+
+That's it really, it only remains to provide some reference information, which I
+will present as a TLDR.
+
+TLDR;
+
+The BabyClk encoding protocol comprises the following elements;
+
+Baby codes use all alphanumeric codes except 'Y' and 'Z' to represent numbers in the
+range [0-59). Ordering is [0-9,'a'-'z','A'-'X']
+
+Duration codes are in the range [0-25) ordered according to the following string;
+"!#$%&()*+,-.:;<=>?@^_{|}~"
+
+An absolute clock time is encoded as two baby codes representing mm ss respectively.
+
+A delta pair is encoded as a duration code followed by two baby codes representing
+the seconds components of the white and black deltas respectively. The minute
+components follows from the duration code itself, with values from 0 => 0,0 through
+24 => 4,4 in the most natural ordering.
+
+Important subtlety: The delta pair is used for two deltas in the range [-30,4:30)
+rather than [0,5) minutes. This captures the small increments resulting from blitzed
+out moves which are very statistically common. We add 30 seconds to an in range
+delta before encoding using the easier range [0,5) minutes, and then subtract the 30
+seconds back after decoding.
+
+Example: white delta 2:31, black delta -20. Add 30 seconds (2:31,-20) => (3:01,0:10),
+To encode 3 minutes and 0 minutes respectively we choose the duration code 15, since
+3*5 + 0*5 = 15. From the reference string this indexes to '='. The two baby codes are
+'1' for ss=01 and 'a' for ss=10. Final encoding is the three character string "=1a".
+
+The final elements of the protocol are the use of 'Y' and 'Z' codes. Z codes are 1
+character codes (simply 'Z') representing missing clock times.
+
+Y codes are two character codes used as a prefix to an absolute code to change the
+current hour. The start time convention is 1:30:00, so a rapid game (for example)
+will need a "Y0" prefix at the start of the BabyClk string. In fact to save a couple
+of bytes for rapid and blitz games we define a new protocol rule to make Y codes at
+the start of the BabyBlk change the hour for both White and Black, instead of just
+the current colour.
+
+A subtlety worth stating explicitly - if a delta code crosses an hour boundary, it
+eliminates the need for a Y code - both encoder and decoder already agree on the new
+current value of the hour state variable.
 
 */
-
-
 
 // Some BabyClk options
 // #define BABY_DEBUG
