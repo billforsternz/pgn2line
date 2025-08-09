@@ -46,7 +46,7 @@ Now the pesky details. We have one clock comment for each main line ply. Almost.
 Sadly Lichess just omits the comment occasionally. So we have a list of moves
 (the main line of the game), and a clock time for each, with a sprinkling of
 omissions occasionally. Each clock time is of the form hh:mm:ss. I support
-hh in the range [0-9), and both mm and ss in the range [0-59) (obviously).
+hh in the range [0-9], and both mm and ss in the range [0-59] (obviously).
 
 We can model this as follows;
 
@@ -74,7 +74,7 @@ at 1.6 characters per clock time is closer to 1.5 (half of three) than 2.
 
 Conveniently, there are 62 ASCII alphanumeric characters. We use 60 of them to
 represent a minute or second value, and we reserve Y and Z for other purposes.
-I call the [0-59) encoding of the 60 alphanumerals "baby coding".
+I call the [0-59] encoding of the 60 alphanumerals "baby coding".
 
 So the basic plan is simply to encode each clock time as two baby codes, one
 for the mm component and one for the ss component. An additional mechanism using
@@ -100,7 +100,7 @@ TLDR;
 The BabyClk encoding protocol comprises the following elements;
 
 Baby codes use all alphanumeric codes except 'Y' and 'Z' to represent numbers in the
-range [0-59). Ordering is [0-9,'a'-'z','A'-'X']
+range [0-59]. Ordering is [0-9,'a'-'z','A'-'X']
 
 Duration codes are in the range [0-25) ordered according to the following string;
 "!#$%&()*+,-.:;<=>?@^_{|}~"
