@@ -104,3 +104,35 @@ void key_update( std::string &header, const std::string key, const std::string k
             key_add(header,key,val);
     }
 }
+
+void key_update2( std::string &header, const std::string key, const std::string key_insert_after1,
+                                                              const std::string key_insert_after2, const std::string val )
+{
+    if( !key_replace(header,key,val) )
+    {
+        bool found = false;
+        for( int i=0; !found && i<2; i++ )
+        {
+            std::string skey = std::string("@H[") + (i==0?key_insert_after1:key_insert_after2) + " \"";
+            auto offset1 = header.find(skey);
+            size_t key_len = skey.length();
+            if( offset1 != std::string::npos )
+            {
+                auto offset2 = header.find("\"]",offset1+key_len);
+                if( offset2 != std::string::npos )
+                {
+                    offset2 += 2;
+                    found = true;
+                    std::string tail = header.substr(offset2);
+                    header = header.substr(0,offset2);
+                    header += (std::string("@H[") + key + " \"");
+                    header += val;
+                    header += std::string("\"]");
+                    header += tail;
+                }
+            }
+        }
+        if( !found || key_insert_after1=="" )
+            key_add(header,key,val);
+    }
+}

@@ -46,23 +46,44 @@ enum NameMatchTier
 
 static const char *tier_txt[] =
 {
-    "no fide-id present or inferred",
-    "no fide-id explicitly specified manually",
-    "player has fide-id in this game",
-    "player has fide-id in other games",
-    "Manual adjustment",
-    "LOCAL complete name match",
-    "LOCAL case insensitive match",
-    "LOCAL case insensitive match after removing period",
-    "LOCAL surname plus forename plus initial match",
-    "LOCAL surname plus forename match",
-    "LOCAL surname plus initial match",
-    "FIDE complete name match",
-    "FIDE case insensitive match",
-    "FIDE case insensitive match after removing period",
-    "FIDE surname plus forename plus initial match",
-    "FIDE surname plus forename match",
-    "FIDE surname plus initial match"
+    /* TIER_NULL=0 */           "no fide-id present or inferred",
+    /* TIER_DOES_NOT_HAVE_ID */ "no fide-id explicitly specified manually",
+    /* TIER_HAS_ID */           "player has fide-id in this game",
+    /* TIER_NATIVE */           "player has fide-id in other games",
+    /* TIER_MANUAL */           "Manual adjustment",
+    /* TIER_NATIONAL_A */       "LOCAL complete name match",
+    /* TIER_NATIONAL_B */       "LOCAL case insensitive match",
+    /* TIER_NATIONAL_C */       "LOCAL case insensitive match after removing period",
+    /* TIER_NATIONAL_D */       "LOCAL surname plus forename plus initial match",
+    /* TIER_NATIONAL_E */       "LOCAL surname plus forename match",
+    /* TIER_NATIONAL_F */       "LOCAL surname plus initial match",
+    /* TIER_FIDE_A */           "FIDE complete name match",
+    /* TIER_FIDE_B */           "FIDE case insensitive match",
+    /* TIER_FIDE_C */           "FIDE case insensitive match after removing period",
+    /* TIER_FIDE_D */           "FIDE surname plus forename plus initial match",
+    /* TIER_FIDE_E */           "FIDE surname plus forename match",
+    /* TIER_FIDE_F */           "FIDE surname plus initial match"
+};
+
+static const char *tier_short_txt[] =
+{
+    /* TIER_NULL=0 */           "NULL",
+    /* TIER_DOES_NOT_HAVE_ID */ "no-fide-id",
+    /* TIER_HAS_ID */           "fide-id",
+    /* TIER_NATIVE */           "other-games",
+    /* TIER_MANUAL */           "manual",
+    /* TIER_NATIONAL_A */       "loc-match",
+    /* TIER_NATIONAL_B */       "loc-ci-match",
+    /* TIER_NATIONAL_C */       "loc-ci-no-dot",
+    /* TIER_NATIONAL_D */       "loc-sur-for-i",
+    /* TIER_NATIONAL_E */       "loc-sur-for",
+    /* TIER_NATIONAL_F */       "loc-sur-i",
+    /* TIER_FIDE_A */           "fide-match",
+    /* TIER_FIDE_B */           "fide-ci-match",
+    /* TIER_FIDE_C */           "fide-ci-no-dot",
+    /* TIER_FIDE_D */           "fide-sur-for-i",
+    /* TIER_FIDE_E */           "fide-sur-for",
+    /* TIER_FIDE_F */           "fide-sur-i"
 };
 
 struct PlayerDetails
@@ -634,7 +655,14 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                     if( TIER_MANUAL <= match_tier && match_tier <= tier_cutoff )
                     {
                         std::string s = util::sprintf("%ld",it->second.id);
-                        key_update(header,i==0?"WhiteFideId":"BlackFideId","Result",s);
+                        key_update2(header,i==0?"WhiteFideId":"BlackFideId",
+                                           i==0?"Result":"WhiteFideId",
+                                           "Result",
+                                           s);
+                        key_update(header,i==0?"WhiteFideIdPropogateSource":"BlackFideIdPropogateSource",
+                                           i==0?"WhiteFideId":"BlackFideId",
+                                           tier_txt[match_tier] );
+
                     }
                 }
 

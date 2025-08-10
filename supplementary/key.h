@@ -12,5 +12,6 @@ bool key_replace( std::string &header, const std::string key, const std::string 
 bool key_delete( std::string &header, const std::string key );
 void key_add( std::string &header, const std::string key, const std::string val );
 void key_update( std::string &header, const std::string key, const std::string key_insert_after, const std::string val );
-
+void key_update2( std::string &header, const std::string key, const std::string key_insert_after1,
+                                                              const std::string key_insert_after2, const std::string val );
 #endif

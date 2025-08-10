@@ -9,6 +9,7 @@
 #include <fstream>
 
 // Basic form: fin, fout
+int cmd_fide_id_report( std::ifstream &in, std::ofstream &out );
 int cmd_remove_auto_commentary( std::ifstream &in, std::ofstream &out );
 int cmd_justify( std::ifstream &in, std::ofstream &out );
 int cmd_nzcf_game_id( std::ifstream &in, std::ofstream &out );

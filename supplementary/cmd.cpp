@@ -1848,6 +1848,96 @@ int cmd_time( std::ifstream &in, std::ofstream &out )
     return 0;
 } 
 
+int cmd_fide_id_report( std::ifstream &in, std::ofstream &out )
+{
+    int line_nbr=0;
+    std::map<long,std::set<std::string>> m;
+    std::string line;
+    for(;;)
+    {
+        if( !std::getline(in, line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        auto offset = line.find("@M");
+        if( offset == std::string::npos )
+            continue;
+        std::string header = line.substr(0,offset);
+        std::string moves  = line.substr(offset);
+
+        // Eval name and fideid tags
+        for( int i=0; i<2; i++ )
+        {
+            std::string name;
+            bool ok = key_find( header, i==0?"White":"Black", name );
+            if( ok && name!="BYE" )
+            {
+                std::string fide_id;
+                bool ok2  = key_find( header, i==0?"WhiteFideId":"BlackFideId", fide_id );
+                long id = atol(fide_id.c_str());
+                ok2 = ok2 && id!=0;
+                if( ok2 )
+                {
+                    auto it = m.find(id);
+                    if( it == m.end() )
+                    {
+                        std::set<std::string> st;
+                        st.insert(name);
+                        m[id] = st;
+                    }
+                    else
+                    {
+                        std::set<std::string> &st = it->second;
+                        st.insert(name);
+                    }
+                }
+            }
+        }
+    }
+    std::vector<std::pair<long,std::set<std::string>>> v;
+    for( auto it=m.begin(); it!=m.end(); it++ )
+    {
+        std::pair<long,std::set<std::string>> pr(it->first,it->second);
+        v.push_back(pr);
+    }
+    std::sort(v.begin(),v.end());
+    for( int i=0; i<2; i++ )
+    {
+        util::putline(out,i==0?"Collisions;":"Regular matches;");
+        for( std::pair<long,std::set<std::string>> &pr: v )
+        {
+            std::set<std::string> &st = pr.second;
+            int n = (int)st.size();
+            bool show = true;
+            if( i==0 )
+                show = (n>1);       // collisions first time through
+            else
+                show = (n==1);      // regular matches second time through
+            if( show )
+            {
+                std::string t = util::sprintf( "%9d: ", pr.first );
+                bool first = true;
+                for( std::string s: pr.second )
+                {
+                    if( n > 1 )
+                        t += first?"[":"; ";
+                    if( n>2 && first )
+                        t += util::sprintf( "(%d)", n );
+                    t += util::sprintf( "%s", s.c_str() );
+                    first = false;
+                }
+                t += util::sprintf( "%s", n==1?"":"]" );
+                util::putline(out,t);
+            }
+        }
+    }
+    return 0;
+}
+
 struct NameYear
 {
     NameYear(const std::string &n, int y) {name=n; year=y;}

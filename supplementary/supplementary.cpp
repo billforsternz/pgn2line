@@ -59,6 +59,7 @@ typedef enum
     tabiya,             
     get_name_fide_id,
     propogate,
+    fide_id_report,
     lichess_broadcast_improve,
     put_name_fide_id,   
     bulk_out_skeleton,  
@@ -94,6 +95,7 @@ static COMMAND table[] =
     {tabiya,             4,  "y in.lpgn out.lpgn                     ;Find Tabiyas in file"},
     {get_name_fide_id,   4,  "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file"},
     {propogate,          8,  "propogate manual-fide-ids.txt nat-fide-ids.txt fide-ids.txt in.lpgn out.lpgn report.txt"},
+    {fide_id_report,     4,  "fir in.lpgn report.txt                 ;Report on fide-id name pairs\n" },
     {lichess_broadcast_improve,4,"lbi in.lpgn out.lpgn                  ;Lichess broadcast improve"},          
     {put_name_fide_id,   5,  "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file"},
     {bulk_out_skeleton,  5,  "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton"},
@@ -117,10 +119,14 @@ int main( int argc, const char **argv )
 #if 1 // def _DEBUG
     const char *args[] =
     {
-        "dont-care.exe",
+        /*"dont-care.exe",
         "rac",
         "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/b.lpgn",
-        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/c.lpgn"
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/c.lpgn" */
+        "dont-care.exe",
+        "fir",
+        "c:/users/bill/documents/chess/nzl/2025/nzl2024-out.lpgn",
+        "c:/users/bill/documents/chess/nzl/2025/fir-report.txt"
         /*"dont-care.exe",
         "propogate",
         "c:/users/bill/documents/chess/nzl/2025/manual-fide-id-adjustments.txt",
@@ -306,6 +312,11 @@ int main( int argc, const char **argv )
         case remove_auto_commentary:
         {
             return cmd_remove_auto_commentary( in, out );
+            break;
+        }
+        case fide_id_report:
+        {
+            return cmd_fide_id_report( in, out );
             break;
         }
         case justify:
