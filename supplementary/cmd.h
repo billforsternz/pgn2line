@@ -16,9 +16,6 @@ int cmd_nzcf_game_id( std::ifstream &in, std::ofstream &out );
 int cmd_refine_dups( std::ifstream &in, std::ofstream &out );
 int cmd_remove_exact_pairs( std::ifstream &in, std::ofstream &out );
 int cmd_get_name_fide_id( std::ifstream &in, std::ofstream &out );
-int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std::ifstream &in_aux_fide,
-                   std::ifstream &in, std::ofstream &out,
-                   std::ofstream &out_report );
 int cmd_lichess_broadcast_improve( std::ifstream &in, std::ofstream &out );
 int cmd_hardwired( std::ifstream &in, std::ofstream &out );
 int cmd_time( std::ifstream &in, std::ofstream &out );
@@ -40,5 +37,10 @@ int cmd_get_known_fide_id_games_plus( std::ifstream &in_aux, std::ifstream &in, 
 int cmd_event( std::ifstream &in, std::ofstream &out, std::string &replace_event );
 int cmd_teams( std::ifstream &in, std::ofstream &out, std::string &name_tsv, std::string &teams_csv );
 int cmd_temp( std::ofstream &out );
+int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::ifstream &in_aux3, std::ifstream &in_aux4,
+                   std::ifstream &in, std::ofstream &out );
+int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std::ifstream &in_aux_fide,
+                   std::ifstream &in, std::ofstream &out,
+                   std::ofstream &out_report );
 
 #endif //CMD_H_INCLUDED

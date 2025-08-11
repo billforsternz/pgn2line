@@ -652,7 +652,7 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                         continue;
                     }    
                     match_tier = it->second.match_tier;
-                    if( TIER_MANUAL <= match_tier && match_tier <= tier_cutoff )
+                    if( TIER_NATIVE <= match_tier && match_tier <= tier_cutoff )
                     {
                         std::string s = util::sprintf("%ld",it->second.id);
                         key_update2(header,i==0?"WhiteFideId":"BlackFideId",
