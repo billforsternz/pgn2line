@@ -42,5 +42,6 @@ int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::if
 int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std::ifstream &in_aux_fide,
                    std::ifstream &in, std::ofstream &out,
                    std::ofstream &out_report );
+int cmd_normalise( std::ifstream &in, std::ofstream &out );
 
 #endif //CMD_H_INCLUDED

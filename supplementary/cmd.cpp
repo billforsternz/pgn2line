@@ -2358,3 +2358,44 @@ int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::if
     }
     return 0;
 }
+
+int cmd_normalise( std::ifstream &in, std::ofstream &out )
+{
+    int line_nbr=0;
+    std::string line;
+
+    // Find names line by line
+    line_nbr=0;
+    std::vector<std::pair<long,std::string>> v;
+    for(;;)
+    {
+        if( !std::getline(in,line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+
+        // Get id and name
+        util::rtrim(line);
+        util::ltrim(line);
+        long id = atol(line.c_str());
+        auto offset = line.find_first_of(" \t");
+        if( offset == std::string::npos )
+            continue;
+        offset = line.find_first_not_of(" \t",offset);
+        if( id==0 || offset == std::string::npos )
+            continue;
+        std::string name = line.substr(offset);
+        std::pair<long,std::string> pr(id,name);
+        v.push_back(pr);
+    }
+    std::sort( v.begin(), v.end() );
+    for( std::pair<long,std::string> &pr: v )
+    {
+        std::string s = util::sprintf( "%-9ld  %s", pr.first, pr.second.c_str() );
+        util::putline( out, s );
+    }
+    return 0;
+}

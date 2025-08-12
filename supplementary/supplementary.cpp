@@ -76,7 +76,8 @@ typedef enum
     pluck_games,        
     pluck_games_reorder,
     remove_exact_pairs, 
-    temp
+    temp,
+    normalise
 } CMD_ENUM;
 
 struct COMMAND
@@ -113,7 +114,8 @@ static COMMAND table[] =
     {pluck_games,        5,  "6 bulk.lpgn in.lpgn out.lpgn           ;replace games in input with close matches from bulk"},
     {pluck_games_reorder,5,  "7 bulk.lpgn in.lpgn out.lpgn           ;like 6, but assume pairs and re-order based on bulk location"},
     {remove_exact_pairs, 4,  "8 in.lpgn out.lpgn                     ;remove exact dup pairs"},
-    {temp,               3,  "temp out.txt                           ;temp miscellaneous utility sorry!"}
+    {temp,               3,  "temp out.txt                           ;temp miscellaneous utility sorry!"},
+    {normalise,          4,  "normalise in.txt out.txt               ;normalise a fide id file"}
 };
 
 int main( int argc, const char **argv )
@@ -423,6 +425,11 @@ int main( int argc, const char **argv )
             std::string name_tsv( argv[4] );
             std::string teams_csv( argv[5] );
             return cmd_teams( in, out, name_tsv, teams_csv );
+            break;
+        }
+        case normalise:
+        {
+            return cmd_normalise( in, out );
             break;
         }
     }
