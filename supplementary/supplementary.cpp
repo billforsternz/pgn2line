@@ -98,7 +98,7 @@ static COMMAND table[] =
     {get_name_fide_id,   4,  "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file"},
     {propogate,          8,  "propogate manual-fide-ids.txt nat-fide-ids.txt fide-ids.txt in.lpgn out.lpgn report.txt"},
     {fide_id_report,     4,  "fir in.lpgn report.txt                 ;Report on fide-id name pairs\n" },
-    {fide_id_to_name,    6,  "rename fide-ids.txt keep.txt in.lpgn out.lpgn   ;Rename players with fide-ids\n" },
+    {fide_id_to_name,    7,  "rename fide-ids.txt keep.txt custom.txt in.lpgn out.lpgn   ;Rename players with fide-ids\n" },
     {lichess_broadcast_improve,4,"lbi in.lpgn out.lpgn                  ;Lichess broadcast improve"},          
     {put_name_fide_id,   5,  "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file"},
     {bulk_out_skeleton,  5,  "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton"},
@@ -153,6 +153,7 @@ int main( int argc, const char **argv )
         "rename",
         "c:/users/bill/documents/chess/nzl/2025/fide-ids-combined-2025.txt",
         "c:/users/bill/documents/chess/nzl/2025/manual-fide-id-no-changes-please.txt",
+        "c:/users/bill/documents/chess/nzl/2025/manual-fide-id-custom.txt",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out.lpgn",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out2.lpgn"
         #endif
@@ -218,8 +219,6 @@ int main( int argc, const char **argv )
             argi_input_file = 3;
             break;
         case fide_id_to_name:
-            argi_input_file = 4;
-            break;
         case propogate:
             argi_input_file = 5;
             break;
@@ -312,22 +311,22 @@ int main( int argc, const char **argv )
                         printf( "Error; Cannot open file %s for reading\n", fin_aux2.c_str() );
                         return -1;
                     }
+                    std::string fin_aux3(argv[4]);
+                    std::ifstream in_aux3(fin_aux3.c_str());
+                    if( !in_aux3 )
+                    {
+                        printf( "Error; Cannot open file %s for reading\n", fin_aux3.c_str() );
+                        return -1;
+                    }
                     switch( purpose )
                     {
                         case fide_id_to_name:
                         {
-                            return cmd_fide_id_to_name( in_aux, in_aux2, in, out );
+                            return cmd_fide_id_to_name( in_aux, in_aux2, in_aux3, in, out );
                             break;
                         }
                         case propogate:
                         {
-                            std::string fin_aux3(argv[4]);
-                            std::ifstream in_aux3(fin_aux3.c_str());
-                            if( !in_aux3 )
-                            {
-                                printf( "Error; Cannot open file %s for reading\n", fin_aux3.c_str() );
-                                return -1;
-                            }
                             std::string fout_report(argv[7]);
                             std::ofstream out_report(fout_report.c_str());
                             if( !out_report )
