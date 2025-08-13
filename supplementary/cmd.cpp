@@ -2144,8 +2144,7 @@ static int lev_distance( const std::string source, const std::string target )
     return matrix[n][m];
 }
 
-int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::ifstream &in_aux3, std::ifstream &in_aux4,
-                         std::ifstream &in, std::ofstream &out )
+int cmd_fide_id_to_name( std::ifstream &in_aux, std::ifstream &in, std::ofstream &out )
 {
     // Stage 1:
     // 
@@ -2155,7 +2154,7 @@ int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::if
     int line_nbr=0;
     std::string line;
 
-    // Find names line by line
+    // Find fide-ids line by line
     line_nbr=0;
     for(;;)
     {
@@ -2187,75 +2186,32 @@ int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::if
     // 
     // Create map of fide-id to name(s) for each fide id we need
     //
-    std::map<long,std::set<std::string>> fide_id_names;
-    for( int file=1; file<=4; file++ )
+    std::map<long,std::string> fide_id_names;
+    line_nbr=0;
+    for(;;)
     {
-        std::ifstream &in_fide = (file<=2 ? (file==1?in_aux1:in_aux2) : (file==3?in_aux3:in_aux4) );
+        if( !std::getline(in_aux,line) )
+            break;
 
-        // Find names line by line
-        line_nbr=0;
-        for(;;)
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        util::ltrim(line);
+        long id = atol(line.c_str());
+        auto it = fide_ids.find(id);
+        if( id>0 && it!=fide_ids.end() )
         {
-            if( !std::getline(in_fide,line) )
-                break;
-
-            // Strip out UTF8 BOM mark (hex value: EF BB BF)
-            if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
-                line = line.substr(3);
-            line_nbr++;
-            util::rtrim(line);
-            util::ltrim(line);
-            long id = atol(line.c_str());
-            auto it = fide_ids.find(id);
-            if( id>0 && it!=fide_ids.end() )
+            size_t offset = line.find(' ');
+            if( offset != std::string::npos )
             {
-                size_t offset = line.find(' ');
+                offset = line.find_first_not_of(' ',offset);
                 if( offset != std::string::npos )
                 {
-                    offset = line.find_first_not_of(' ',offset);
-                    if( offset != std::string::npos )
-                    {
-                        std::string name = line.substr(offset);
-                        util::rtrim(name);
-                        auto it2 = fide_id_names.find(id);
-                        if( it2 == fide_id_names.end() )
-                        {
-                            std::set<std::string> st;
-                            st.insert(name);
-                            fide_id_names[id] = st;
-                        }
-                        else
-                        {
-                            std::set<std::string> &st = it2->second;
-                            int min_distance = 100;
-                            bool already_found = false;
-                            for( auto it3 =st.begin(); it3!=st.end(); it3++ )
-                            {
-                                std::string already = *it3;
-                                if( name == already )
-                                {
-                                    already_found = true;
-                                    break;
-                                }
-                                else
-                                {
-                                    int distance = lev_distance( name, already );
-                                    if( distance < min_distance )
-                                        min_distance = distance;
-                                }
-                            }
-                            if( !already_found && min_distance > 2 )
-                            {
-                                printf( "%-9ld: adding %s, Total set is now\n", id, name.c_str() );
-                                st.insert(name);
-                                for( auto it3 =st.begin(); it3!=st.end(); it3++ )
-                                {
-                                    std::string s = *it3;
-                                    printf( " %s\n", s.c_str() );
-                                }
-                            }
-                        }
-                    }
+                    std::string name = line.substr(offset);
+                    util::rtrim(name);
+                    fide_id_names[id] = name;
                 }
             }
         }
@@ -2268,6 +2224,7 @@ int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::if
     in.seekg(0);
     line_nbr=0;
     std::set<std::string> warnings;
+    std::vector<std::string> errors;
     for(;;)
     {
         if( !std::getline(in, line) )
@@ -2311,42 +2268,33 @@ int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::if
                     }    
                     else
                     {
-                        std::string best_so_far;
-                        int min_distance = 100;
-                        std::set<std::string> &st = it->second;
-                        for( auto it2 = st.begin(); it2!=st.end(); it2++ )
+                        std::string replacement = it->second;
+                        int distance = lev_distance( name, replacement );
+                        key_update( header, i==0?"White":"Black", "Result", replacement );
+                        if( distance > 2 )
                         {
-                            std::string s = *it2;
-                            if( name == s )
-                            {
-                                min_distance = 0;
-                                best_so_far = s;
-                                break;
-                            }
-                            else
-                            {
-                                int distance = lev_distance( name, s );
-                                if( s=="" || distance<min_distance )
-                                {
-                                    min_distance = distance;
-                                    best_so_far = s;
-                                }
-                            }
-                        }
-                        key_update( header, i==0?"White":"Black", "Result", best_so_far );
-                        if( min_distance > 2 )
-                        {
-                            std::string s = util::sprintf( "WARNING, replacing %s by %s (distance %d)\n", name.c_str(), best_so_far.c_str(), min_distance );
+                            std::string s = util::sprintf( "WARNING, replacing %s by %s (distance %d)\n", name.c_str(), replacement.c_str(), distance );
                             auto iit = warnings.find(s);
                             if( iit == warnings.end() )
                             {
                                 printf("%s",s.c_str() );
                                 warnings.insert(s);
+                                std::string lhs = util::tolower(name);
+                                if( lhs.length() > 4 )
+                                    lhs = lhs.substr( 0, 4 );
+                                std::string rhs = util::tolower(replacement);
+                                if( rhs.length() > 4 )
+                                    rhs = rhs.substr( 0, 4 );
+                                if( distance>8 && lhs!=rhs )
+                                {
+                                    std::string t = util::sprintf( "ERROR (suspected), replacing %s by %s (distance %d)\n", name.c_str(), replacement.c_str(), distance );
+                                    errors.push_back(t);
+                                }
                             }
                         }
-                        if( name != best_so_far )
+                        if( name != replacement )
                         {
-                            key_update2( header, i==0?"WhiteOriginalName":"BlackOriginalName", i==0?"Black":"WhiteOriginalName", "Black", best_so_far );
+                            key_update2( header, i==0?"WhiteOriginalName":"BlackOriginalName", i==0?"Black":"WhiteOriginalName", "Black", replacement );
                         }
                     }
                 }
@@ -2356,6 +2304,9 @@ int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::if
         // Write updated output
         util::putline(out,header+moves);       
     }
+    for( std::string &s: errors )
+        printf( "%s", s.c_str() );
+    printf( "%zd unique warnings including %zd suspected errors and from %zd unique replacements\n", warnings.size(), errors.size(), fide_ids.size() );
     return 0;
 }
 

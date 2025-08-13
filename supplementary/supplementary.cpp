@@ -98,7 +98,7 @@ static COMMAND table[] =
     {get_name_fide_id,   4,  "gf in.lpgn id-players.txt              ;Get Player names from FIDE-ids from file"},
     {propogate,          8,  "propogate manual-fide-ids.txt nat-fide-ids.txt fide-ids.txt in.lpgn out.lpgn report.txt"},
     {fide_id_report,     4,  "fir in.lpgn report.txt                 ;Report on fide-id name pairs\n" },
-    {fide_id_to_name,    8,  "rename fide-ids-1.txt 2.txt 3.txt 4.txt in.lpgn out.lpgn ;Rename players with fide-ids from up to 4 files\n" },
+    {fide_id_to_name,    5,  "rename fide-ids.txt in.lpgn out.lpgn   ;Rename players with fide-ids\n" },
     {lichess_broadcast_improve,4,"lbi in.lpgn out.lpgn                  ;Lichess broadcast improve"},          
     {put_name_fide_id,   5,  "pf id-players.txt in.lpgn out.lpgn     ;Put Player names from FIDE-ids to file"},
     {bulk_out_skeleton,  5,  "s bulk.lpgn skeleton.lpgn out.lpgn     ;Find games from bulk for skeleton"},
@@ -120,7 +120,7 @@ static COMMAND table[] =
 
 int main( int argc, const char **argv )
 {
-#if 0 // def _DEBUG
+#if 1 // def _DEBUG
     const char *args[] =
     {
         /*"dont-care.exe",
@@ -151,10 +151,7 @@ int main( int argc, const char **argv )
         #if 1
         "dont-care.exe",
         "rename",
-        "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2025.txt",
-        "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2018.txt",
-        "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-2000.txt",
-        "c:/users/bill/documents/chess/nzl/2025/fide-ids-all-1992.txt",
+        "c:/users/bill/documents/chess/nzl/2025/fide-ids-combined-2025.txt",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out.lpgn",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out2.lpgn"
         #endif
@@ -217,13 +214,12 @@ int main( int argc, const char **argv )
         case collect_fide_id:
         case get_known_fide_id_games_plus:
         case put_name_fide_id:
+        case fide_id_to_name:
             argi_input_file = 3;
             break;
         case propogate:
             argi_input_file = 5;
             break;
-        case fide_id_to_name:
-            argi_input_file = 6;
     }
 
     // Open main input and output files
@@ -304,6 +300,10 @@ int main( int argc, const char **argv )
                     break;
                 }
                 case fide_id_to_name:
+                {
+                    return cmd_fide_id_to_name( in_aux, in, out );
+                    break;
+                }
                 case propogate:
                 {
                     std::string fin_aux2(argv[3]);
@@ -320,31 +320,14 @@ int main( int argc, const char **argv )
                         printf( "Error; Cannot open file %s for reading\n", fin_aux3.c_str() );
                         return -1;
                     }
-                    switch( purpose )
+                    std::string fout_report(argv[7]);
+                    std::ofstream out_report(fout_report.c_str());
+                    if( !out_report )
                     {
-                        case fide_id_to_name:
-                        {
-                            std::string fin_aux4(argv[5]);
-                            std::ifstream in_aux4(fin_aux4.c_str());
-                            if( !in_aux4 )
-                            {
-                                printf( "Error; Cannot open file %s for reading\n", fin_aux4.c_str() );
-                                return -1;
-                            }
-                            return cmd_fide_id_to_name( in_aux, in_aux2, in_aux3, in_aux4, in, out );
-                        }
-                        case propogate:
-                        {
-                            std::string fout_report(argv[7]);
-                            std::ofstream out_report(fout_report.c_str());
-                            if( !out_report )
-                            {
-                                printf( "Error; Cannot open file %s for writing\n", fout_report.c_str() );
-                                return -1;
-                            }
-                            return cmd_propogate( in_aux, in_aux2, in_aux3, in, out, out_report );
-                        }
+                        printf( "Error; Cannot open file %s for writing\n", fout_report.c_str() );
+                        return -1;
                     }
+                    return cmd_propogate( in_aux, in_aux2, in_aux3, in, out, out_report );
                     break;
                 }
             }
