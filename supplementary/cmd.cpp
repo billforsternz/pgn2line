@@ -2144,7 +2144,7 @@ static int lev_distance( const std::string source, const std::string target )
     return matrix[n][m];
 }
 
-int cmd_fide_id_to_name( std::ifstream &in_aux, std::ifstream &in, std::ofstream &out )
+int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::ifstream &in, std::ofstream &out )
 {
     // Stage 1:
     // 
@@ -2190,7 +2190,7 @@ int cmd_fide_id_to_name( std::ifstream &in_aux, std::ifstream &in, std::ofstream
     line_nbr=0;
     for(;;)
     {
-        if( !std::getline(in_aux,line) )
+        if( !std::getline(in_aux1,line) )
             break;
 
         // Strip out UTF8 BOM mark (hex value: EF BB BF)
@@ -2217,6 +2217,41 @@ int cmd_fide_id_to_name( std::ifstream &in_aux, std::ifstream &in, std::ofstream
         }
     }
 
+    // Stage 2a:
+    // 
+    // Create map of fide-id to name(s) for each fide id we need
+    //
+    std::map<long,std::string> fide_id_names_to_keep;
+    line_nbr=0;
+    for(;;)
+    {
+        if( !std::getline(in_aux2,line) )
+            break;
+
+        // Strip out UTF8 BOM mark (hex value: EF BB BF)
+        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+            line = line.substr(3);
+        line_nbr++;
+        util::rtrim(line);
+        util::ltrim(line);
+        long id = atol(line.c_str());
+        auto it = fide_ids.find(id);
+        if( id>0 && it!=fide_ids.end() )
+        {
+            size_t offset = line.find(' ');
+            if( offset != std::string::npos )
+            {
+                offset = line.find_first_not_of(' ',offset);
+                if( offset != std::string::npos )
+                {
+                    std::string name = line.substr(offset);
+                    util::rtrim(name);
+                    fide_id_names_to_keep[id] = name;
+                }
+            }
+        }
+    }
+
     //
     // Stage 3: Output file with updated names
     //
@@ -2225,6 +2260,7 @@ int cmd_fide_id_to_name( std::ifstream &in_aux, std::ifstream &in, std::ofstream
     line_nbr=0;
     std::set<std::string> warnings;
     std::vector<std::string> errors;
+    std::vector<std::string> skips;
     for(;;)
     {
         if( !std::getline(in, line) )
@@ -2252,50 +2288,63 @@ int cmd_fide_id_to_name( std::ifstream &in_aux, std::ifstream &in, std::ofstream
                 bool ok2  = key_find( header, i==0?"WhiteFideId":"BlackFideId", fide_id );
                 long id = atol(fide_id.c_str());
                 ok2 = ok2 && id!=0;
+                auto it = fide_id_names.find(id);
+                if( ok2 && it == fide_id_names.end() )
+                {
+                    std::string s = util::sprintf( "WARNING: Player (%s; %ld), not found second time through\n", name.c_str(), id );
+                    auto iit = warnings.find(s);
+                    if( iit == warnings.end() )
+                    {
+                        printf("%s",s.c_str() );
+                        warnings.insert(s);
+                    }
+                    ok2 = false;
+                }    
                 if( ok2 )
                 {
-                    auto it = fide_id_names.find(id);
-                    if( it == fide_id_names.end() )
+                    auto it2 = fide_id_names_to_keep.find(id);
+                    if( it2 != fide_id_names_to_keep.end() && it2->first==id && it2->second==name )
                     {
-                        std::string s = util::sprintf( "WARNING: Player (%s; %ld), not found second time through\n", name.c_str(), id );
+                        std::string s = util::sprintf( "SKIPPING: Player (%s; %ld), not updated\n", name.c_str(), id );
                         auto iit = warnings.find(s);
                         if( iit == warnings.end() )
                         {
                             printf("%s",s.c_str() );
                             warnings.insert(s);
+                            skips.push_back(s);
                         }
-                        continue;
-                    }    
-                    else
+                        ok2 = false;
+                    }
+                }        
+                if( ok2 )
+                {
+                    std::string replacement = it->second;
+                    int distance = lev_distance( name, replacement );
+                    key_update( header, i==0?"White":"Black", "Result", replacement );
+                    if( distance > 2 )
                     {
-                        std::string replacement = it->second;
-                        int distance = lev_distance( name, replacement );
-                        key_update( header, i==0?"White":"Black", "Result", replacement );
-                        if( distance > 2 )
+                        std::string s = util::sprintf( "WARNING, %ld replacing %s by %s (distance %d)\n", id, name.c_str(), replacement.c_str(), distance );
+                        auto iit = warnings.find(s);
+                        if( iit == warnings.end() )
                         {
-                            std::string s = util::sprintf( "WARNING, replacing %s by %s (distance %d)\n", name.c_str(), replacement.c_str(), distance );
-                            auto iit = warnings.find(s);
-                            if( iit == warnings.end() )
+                            printf("%s",s.c_str() );
+                            warnings.insert(s);
+                            std::string lhs = util::tolower(name);
+                            if( lhs.length() > 4 )
+                                lhs = lhs.substr( 0, 4 );
+                            std::string rhs = util::tolower(replacement);
+                            if( rhs.length() > 4 )
+                                rhs = rhs.substr( 0, 4 );
+                            if( distance>8 && lhs!=rhs )
                             {
-                                printf("%s",s.c_str() );
-                                warnings.insert(s);
-                                std::string lhs = util::tolower(name);
-                                if( lhs.length() > 4 )
-                                    lhs = lhs.substr( 0, 4 );
-                                std::string rhs = util::tolower(replacement);
-                                if( rhs.length() > 4 )
-                                    rhs = rhs.substr( 0, 4 );
-                                if( distance>8 && lhs!=rhs )
-                                {
-                                    std::string t = util::sprintf( "ERROR (suspected), replacing %s by %s (distance %d)\n", name.c_str(), replacement.c_str(), distance );
-                                    errors.push_back(t);
-                                }
+                                std::string t = util::sprintf( "ERROR (suspected), %ld replacing %s by %s (distance %d)\n", id, name.c_str(), replacement.c_str(), distance );
+                                errors.push_back(t);
                             }
                         }
-                        if( name != replacement )
-                        {
-                            key_update2( header, i==0?"WhiteOriginalName":"BlackOriginalName", i==0?"Black":"WhiteOriginalName", "Black", replacement );
-                        }
+                    }
+                    if( name != replacement )
+                    {
+                        key_update2( header, i==0?"WhiteOriginalName":"BlackOriginalName", i==0?"Black":"WhiteOriginalName", "Black", replacement );
                     }
                 }
             }
@@ -2306,7 +2355,9 @@ int cmd_fide_id_to_name( std::ifstream &in_aux, std::ifstream &in, std::ofstream
     }
     for( std::string &s: errors )
         printf( "%s", s.c_str() );
-    printf( "%zd unique warnings including %zd suspected errors and from %zd unique replacements\n", warnings.size(), errors.size(), fide_ids.size() );
+    for( std::string &s: skips )
+        printf( "%s", s.c_str() );
+    printf( "%zd unique warnings including %zd suspected errors and %zd skips from %zd unique replacements\n", warnings.size(), errors.size(), skips.size(), fide_ids.size() );
     return 0;
 }
 

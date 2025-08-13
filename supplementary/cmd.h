@@ -32,12 +32,12 @@ int cmd_add_ratings( std::ifstream &in_aux, std::ifstream &in, std::ofstream &ou
 int cmd_collect_fide_id( std::ifstream &in_aux, std::ifstream &in, std::ofstream &out );
 int cmd_put_name_fide_id( std::ifstream &in_aux, std::ifstream &in, std::ofstream &out );
 int cmd_get_known_fide_id_games_plus( std::ifstream &in_aux, std::ifstream &in, std::ofstream &out );
-int cmd_fide_id_to_name( std::ifstream &in_aux, std::ifstream &in, std::ofstream &out );
 
 // Misc
 int cmd_event( std::ifstream &in, std::ofstream &out, std::string &replace_event );
 int cmd_teams( std::ifstream &in, std::ofstream &out, std::string &name_tsv, std::string &teams_csv );
 int cmd_temp( std::ofstream &out );
+int cmd_fide_id_to_name( std::ifstream &in_aux1, std::ifstream &in_aux2, std::ifstream &in, std::ofstream &out );
 int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std::ifstream &in_aux_fide,
                    std::ifstream &in, std::ofstream &out,
                    std::ofstream &out_report );
