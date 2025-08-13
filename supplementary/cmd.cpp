@@ -2186,103 +2186,47 @@ int cmd_fide_id_to_name( std::ifstream &in_aux_fide, std::ifstream &in_aux_keep,
     // Stage 2:
     // 
     // Create map of fide-id to name(s) for each fide id we need
+    // Also maps of sacrosanct pairs and custom replacements
     //
     std::map<long,std::string> fide_id_names;
-    line_nbr=0;
-    for(;;)
-    {
-        if( !std::getline(in_aux_fide,line) )
-            break;
-
-        // Strip out UTF8 BOM mark (hex value: EF BB BF)
-        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
-            line = line.substr(3);
-        line_nbr++;
-        util::rtrim(line);
-        util::ltrim(line);
-        long id = atol(line.c_str());
-        auto it = fide_ids.find(id);
-        if( id>0 && it!=fide_ids.end() )
-        {
-            size_t offset = line.find(' ');
-            if( offset != std::string::npos )
-            {
-                offset = line.find_first_not_of(' ',offset);
-                if( offset != std::string::npos )
-                {
-                    std::string name = line.substr(offset);
-                    util::rtrim(name);
-                    fide_id_names[id] = name;
-                }
-            }
-        }
-    }
-
-    // Stage 2a:
-    // 
-    // Create map of fide-id to name(s) for each fide id we need to leave unchanged
-    //
     std::map<long,std::string> fide_id_names_to_keep;
-    line_nbr=0;
-    for(;;)
-    {
-        if( !std::getline(in_aux_keep,line) )
-            break;
-
-        // Strip out UTF8 BOM mark (hex value: EF BB BF)
-        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
-            line = line.substr(3);
-        line_nbr++;
-        util::rtrim(line);
-        util::ltrim(line);
-        long id = atol(line.c_str());
-        auto it = fide_ids.find(id);
-        if( id>0 && it!=fide_ids.end() )
-        {
-            size_t offset = line.find(' ');
-            if( offset != std::string::npos )
-            {
-                offset = line.find_first_not_of(' ',offset);
-                if( offset != std::string::npos )
-                {
-                    std::string name = line.substr(offset);
-                    util::rtrim(name);
-                    fide_id_names_to_keep[id] = name;
-                }
-            }
-        }
-    }
-
-    // Stage 2b:
-    // 
-    // Create map of fide-id to name(s) for each fide id with custom manual changes
-    //
     std::map<long,std::string> fide_id_names_custom;
-    line_nbr=0;
-    for(;;)
+    for( int fide_file=0; fide_file<3; fide_file++ )
     {
-        if( !std::getline(in_aux_custom,line) )
-            break;
-
-        // Strip out UTF8 BOM mark (hex value: EF BB BF)
-        if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
-            line = line.substr(3);
-        line_nbr++;
-        util::rtrim(line);
-        util::ltrim(line);
-        long id = atol(line.c_str());
-        auto it = fide_ids.find(id);
-        if( id>0 && it!=fide_ids.end() )
+        std::map<long,std::string> &m =
+                      (fide_file==0 ? fide_id_names
+                                    : (fide_file==1?fide_id_names_to_keep:fide_id_names_custom)
+                      );
+        std::ifstream &in_fide =
+                      (fide_file==0 ? in_aux_fide
+                                    : (fide_file==1?in_aux_keep:in_aux_custom)
+                      );
+        line_nbr=0;
+        for(;;)
         {
-            size_t offset = line.find(' ');
-            if( offset != std::string::npos )
+            if( !std::getline(in_fide,line) )
+                break;
+
+            // Strip out UTF8 BOM mark (hex value: EF BB BF)
+            if( line_nbr==0 && line.length()>=3 && line[0]==-17 && line[1]==-69 && line[2]==-65)
+                line = line.substr(3);
+            line_nbr++;
+            util::rtrim(line);
+            util::ltrim(line);
+            long id = atol(line.c_str());
+            auto it = fide_ids.find(id);
+            if( id>0 && it!=fide_ids.end() )
             {
-                offset = line.find_first_not_of(' ',offset);
+                size_t offset = line.find(' ');
                 if( offset != std::string::npos )
                 {
-                    std::string name = line.substr(offset);
-                    util::rtrim(name);
-                    fide_id_names_custom[id] = name;
+                    offset = line.find_first_not_of(' ',offset);
+                    if( offset != std::string::npos )
+                    {
+                        std::string name = line.substr(offset);
+                        util::rtrim(name);
+                        m[id] = name;
+                    }
                 }
             }
         }
