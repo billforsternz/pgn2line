@@ -120,7 +120,7 @@ static COMMAND table[] =
 
 int main( int argc, const char **argv )
 {
-#if 1 // def _DEBUG
+#if 0 // def _DEBUG
     const char *args[] =
     {
         /*"dont-care.exe",

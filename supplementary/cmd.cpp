@@ -203,11 +203,14 @@ int cmd_remove_auto_commentary( std::ifstream &in, std::ofstream &out )
         total_lines++;
         size_t len = encoded_clk_times.length();
         size_t remaining = len;
+        offset=0;
+        std::string prev = "Result";
         for( int i=0; remaining>0; i++ )
         {
-            size_t offset=0;
             size_t chunk = remaining<65 ? remaining : 65;
-            key_update(header,util::sprintf("BabyClk%d",i+1),"Result",encoded_clk_times.substr(offset,chunk) );
+            std::string tag = util::sprintf("BabyClk%d",i+1);
+            key_update(header,tag,prev,encoded_clk_times.substr(offset,chunk) );
+            prev = tag;
             offset += chunk;
             remaining -= chunk;
         }
