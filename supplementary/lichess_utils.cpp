@@ -291,6 +291,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
     printf("\nclk_times_encode()\n" );
     #endif
     encoded_clk_times.clear();
+    bool blitzing_mode=false;
 
     // Set the initial time, for encoding and decoding
     int len = (int) clk_times.size();
@@ -324,6 +325,11 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         // If we don't have a second half, write this one out, we're done
         if( !more )
         {
+            if( blitzing_mode && emit_abs!="Z" )
+            {
+                blitzing_mode = false;
+                encoded_clk_times += '!';
+            }
             encoded_clk_times += emit_abs;
             #ifdef BABY_DEBUG
             printf( "ragged %06x %s\n", hhmmss1, emit_abs.c_str() );
@@ -351,7 +357,10 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
 
             // Note that duration encoding may mean no hour updates are necessary when the
             //  hour changes
-            encoded_clk_times += punc_code;
+            if( !blitzing_mode || punc_code!='!' )
+                encoded_clk_times += punc_code;
+            if( punc_code=='!' )
+                blitzing_mode = true;
             encoded_clk_times += baby_w;
             encoded_clk_times += baby_b;
             #ifdef BABY_DEBUG
@@ -363,6 +372,11 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         else
         {
             time -= duration;
+            if( blitzing_mode && emit_abs!="Z" )
+            {
+                blitzing_mode = false;
+                encoded_clk_times += '!';
+            }
             encoded_clk_times += emit_abs;
             #ifdef BABY_DEBUG
             printf( "time_%c %06x %s\n", white?'w':'b', hhmmss1, emit_abs.c_str() );
@@ -378,6 +392,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
     int hh_w=1,  hh_b=1;  // start times are 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
     int mm_w=30, mm_b=30;
     int ss_w=0,  ss_b=0;
+    bool blitzing_mode = false;
 
     // keep time in seconds, and its hh,mm,ss components in sync as state variables
     int time_w = hh_w*3600 + mm_w*60 + ss_w;
@@ -443,8 +458,26 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 else if( punc_idx(c,idx) )
                 {
                     punc_code = c;
-                    state = duration_w;
-                    white_save = white; // save whether duration represents a (w,b) or (b,w) pair
+                    if( c == '!' && blitzing_mode )
+                    {
+                        blitzing_mode = false;  // have to waste a character ending blitzing mode sometimes
+                    }
+                    else if( c == '!' && !blitzing_mode )
+                    {
+                        blitzing_mode = true;
+                        state = duration_w;
+                        white_save = white; // save whether duration represents a (w,b) or (b,w) pair
+                    }
+                    else
+                    {
+                        state = duration_w;
+                        white_save = white; // save whether duration represents a (w,b) or (b,w) pair
+                    }
+                }
+                else if( blitzing_mode )
+                {
+                    baby_w = c;
+                    state = duration_b;
                 }
                 else
                 {
@@ -507,7 +540,10 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
             case duration_b:
             {
                 baby_b = c;
-                state = white_save?minute_w:minute_b;
+                if( blitzing_mode )
+                    state = white_save?minute_w:minute_b;
+                else
+                    state = white_save?minute_w:minute_b;
                 int dur_w, dur_b;
                 punc_decode(punc_code,baby_w,baby_b,dur_w,dur_b);
                 #ifdef BABY_DEBUG
