@@ -100,10 +100,10 @@ TLDR;
 The BabyClk encoding protocol comprises the following elements;
 
 Baby codes use all alphanumeric codes except 'Y' and 'Z' to represent numbers in the
-range [0-59]. Ordering is [0-9,'a'-'z','A'-'X']
+range [0-59]. Ordering is ['0'-'9','a'-'z','A'-'X']
 
 Duration codes are in the range [0-25) ordered according to the following string;
-"!#$%&()*+,-.:;<=>?@^_{|}~"
+"!#$%&()*+,-.:;<=>?^_`{|}~"
 
 An absolute clock time is encoded as two baby codes representing mm ss respectively.
 
@@ -130,7 +130,7 @@ Y codes are two character codes used as a prefix to an absolute code to change t
 current hour. The start time convention is 1:30:00, so a rapid game (for example)
 will need a "Y0" prefix at the start of the BabyClk string. In fact to save a couple
 of bytes for rapid and blitz games we define a new protocol rule to make Y codes at
-the start of the BabyBlk change the hour for both White and Black, instead of just
+the start of the BabyClk change the hour for both White and Black, instead of just
 the current colour.
 
 A subtlety worth stating explicitly - if a delta code crosses an hour boundary, it
@@ -181,14 +181,14 @@ static int baby_decode( char baby )
 // ASCII printables complete -> !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
 //
 // 25 inoffensive punctuation codes in a PGN context -> !#$%&()*+,-.:;<=>?@^_{|}~
-//  Avoids annoying symbols like each of -> "\/'`[]
+//  Avoids annoying symbols like each of -> "\/'`[]  (actually now @ out ` in to avoid @h, @M problems)
 //  Of course '[' and ']' are only annoying in a PGN context
 //  We did have a more complicated 31 character scheme but the 25 character scheme is
 //  simpler, and more future proof
 
 // Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios, all combinations of
 //  both players durations when they both fit in the same 5 minute window
-static const char *punc = "!#$%&()*+,-.:;<=>?@^_{|}~";  // one benefit; avoids /\"'`[] and Z
+static const char *punc = "!#$%&()*+,-.:;<=>?^_`{|}~";  // one benefit; avoids /\"'[] and Z
 
 // Punctuation code -> idx in range 0-24
 static bool punc_idx( char in, int &idx )
