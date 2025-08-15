@@ -13,7 +13,7 @@
  * 
 
 The problem; Lichess (and other computer chess systems) often litter PGN chess
-documents with clock times as comments, for example {[clk 1:29:30]}.
+documents with clock times as comments, for example {[%clk 1:29:30]}.
 
 These are fantastically ugly and generally unappealing, but there's no doubt
 they hold useful information.
@@ -325,11 +325,8 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         // If we don't have a second half, write this one out, we're done
         if( !more )
         {
-            if( blitzing_mode && emit_abs!="Z" )
-            {
-                blitzing_mode = false;
+            if( blitzing_mode )
                 encoded_clk_times += '!';
-            }
             encoded_clk_times += emit_abs;
             #ifdef BABY_DEBUG
             printf( "ragged %06x %s\n", hhmmss1, emit_abs.c_str() );
@@ -349,18 +346,18 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         // If duration coding , consume both elements
         if( duration_coding )
         {
+            // Note that duration encoding may mean no hour updates are necessary when the
+            //  hour changes
 
             // Consume both
             i++;
             time_w -= duration_w;
             time_b -= duration_b;
 
-            // Note that duration encoding may mean no hour updates are necessary when the
-            //  hour changes
-            if( !blitzing_mode || punc_code!='!' )
+            // New optimization, blitzing_mode, '!' punctuation persists
+            if( !blitzing_mode || punc_code != '!' )
                 encoded_clk_times += punc_code;
-            if( punc_code=='!' )
-                blitzing_mode = true;
+            blitzing_mode = (punc_code == '!');
             encoded_clk_times += baby_w;
             encoded_clk_times += baby_b;
             #ifdef BABY_DEBUG
@@ -372,10 +369,12 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         else
         {
             time -= duration;
-            if( blitzing_mode && emit_abs!="Z" )
+            if( blitzing_mode )
             {
                 blitzing_mode = false;
-                encoded_clk_times += '!';
+                encoded_clk_times += '!';   // need something to terminate blitzing_mode
+                // '!' makes no sense as a duration code in blitzing_mode, so use it to indicate
+                // blitzing_mode -> absolute instead.
             }
             encoded_clk_times += emit_abs;
             #ifdef BABY_DEBUG
@@ -450,10 +449,12 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     #endif
                     clk_times.push_back(-1);    // Z = filler for absent clock time
                     state = white?minute_b:minute_w;
+                    blitzing_mode = false;
                 }
                 else if( c == 'Y' )
                 {
                     state = (white?hour_w:hour_b);
+                    blitzing_mode = false;
                 }
                 else if( punc_idx(c,idx) )
                 {
@@ -461,21 +462,19 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     if( c == '!' && blitzing_mode )
                     {
                         blitzing_mode = false;  // have to waste a character ending blitzing mode sometimes
-                    }
-                    else if( c == '!' && !blitzing_mode )
-                    {
-                        blitzing_mode = true;
-                        state = duration_w;
-                        white_save = white; // save whether duration represents a (w,b) or (b,w) pair
+                        // '!' makes no sense as a duration code in blitzing_mode, so use it to indicate
+                        // blitzing_mode -> absolute instead. Stay in same state, mm ss are coming next
                     }
                     else
                     {
+                        blitzing_mode = (c == '!');
                         state = duration_w;
                         white_save = white; // save whether duration represents a (w,b) or (b,w) pair
                     }
                 }
                 else if( blitzing_mode )
                 {
+                    // We have effectively jumped straight to duration_w state
                     baby_w = c;
                     state = duration_b;
                 }
@@ -540,10 +539,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
             case duration_b:
             {
                 baby_b = c;
-                if( blitzing_mode )
-                    state = white_save?minute_w:minute_b;
-                else
-                    state = white_save?minute_w:minute_b;
+                state = white_save?minute_w:minute_b;
                 int dur_w, dur_b;
                 punc_decode(punc_code,baby_w,baby_b,dur_w,dur_b);
                 #ifdef BABY_DEBUG

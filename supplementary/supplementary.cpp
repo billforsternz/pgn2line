@@ -138,6 +138,12 @@ int main( int argc, const char **argv )
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out.lpgn",
         "c:/users/bill/documents/chess/nzl/2025/fir-report.txt"
         #endif
+        #if 1
+        "dont-care.exe",
+        "rac",
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/lichess-broadcasts-2025-nz.lpgn",
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/lichess-broadcasts-2025-nz-out.lpgn"
+        #endif
         #if 0
         "dont-care.exe",
         "propogate",
@@ -148,7 +154,7 @@ int main( int argc, const char **argv )
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out.lpgn",
         "c:/users/bill/documents/chess/nzl/2025/player-details-fide-2024.txt"
         #endif
-        #if 1
+        #if 0
         "dont-care.exe",
         "rename",
         "c:/users/bill/documents/chess/nzl/2025/fide-ids-combined-2025.txt",
