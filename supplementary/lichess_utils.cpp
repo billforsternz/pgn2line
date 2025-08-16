@@ -93,9 +93,9 @@ then two baby codes, one for white and one for black respectively, representing 
 seconds component of the white and black delta.
 
 That's it really, it only remains to provide some reference information, which I
-will present as a TLDR.
+will present as a TLDR (sadly the TLDR is now longer than the main explanation).
 
-TLDR;
+TLDR (really, the details);
 
 The BabyClk encoding protocol comprises the following elements;
 
@@ -127,11 +127,17 @@ The final elements of the protocol are the use of 'Y' and 'Z' codes. Z codes are
 character codes (simply 'Z') representing missing clock times.
 
 Y codes are two character codes used as a prefix to an absolute code to change the
-current hour. The start time convention is 1:30:00, so a rapid game (for example)
-will need a "Y0" prefix at the start of the BabyClk string. In fact to save a couple
-of bytes for rapid and blitz games we define a new protocol rule to make Y codes at
-the start of the BabyClk change the hour for both White and Black, instead of just
-the current colour.
+current hour for the current colour only. The current time for each side is tracked.
+We could use a set initial value, but we try to do better to avoid two early
+Y codes and also to increase our chance of going straight into delta encoding. The
+starting time is set by the first character of the BabyClk string. The special
+character is encoded using this table.
+
+start_time_minutes[] = {90,3,5,10,15,25,30,60,75,120};
+
+The values from the table are encoded as 'A','B'...'J'. 'A' is the default and is
+omitted unless such omission would result in the first character of the BabyClk string
+happening to unhelpfully fall into this 'A'-'J' range.
 
 A subtlety worth stating explicitly - if a delta code crosses an hour boundary, it
 eliminates the need for a Y code - both encoder and decoder already agree on the new
@@ -146,6 +152,12 @@ Y or Z code appears in the character stream. To end blitzing mode to transition 
 absolute time we have to do something special, "wasting" a character. We insert a
 terminating '!'. This makes no sense as a duration code, since we are already in
 blitzing mode it's not needed in that role, so we use it for this special job.
+
+Just one more one more thing: We how have a useful little optimisation for the end
+of the BabyClk string - if we have just one more clock time to encode and we are in
+blitzing mode and the final clock time can be represented as a -30 to 30 second
+duration: Them we stay in blitzing mode and represent that clock time with just one
+character instead of three ('!' to leave blitzing mode plus mm and ss baby codes).
 
 */
 
@@ -293,6 +305,12 @@ static void clk_times_encode_ply( bool filler, int time, int hh, int mm, int ss,
     out += baby;
 }
 
+// Start time encoding is an optimisation, use a single letter at the start of the BabyClk string
+static int start_time_codes[] = {90,3,5,10,15,25,30,60,75,120};
+#define START_TIME_CODE_MIN 'A'     // 'A' is minimum and also default
+#define START_TIME_CODE_MAX ('A' + sizeof(start_time_codes)/sizeof(start_time_codes[0]) - 1)
+#define START_TIME_CODE_DEFAULT 'A'
+
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
 //  Babylonian (base-60) clock times 
 static void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_clk_times )
@@ -303,17 +321,37 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
     encoded_clk_times.clear();
     bool blitzing_mode=false;
 
-    // Set the initial time, for encoding and decoding
+    // Set a good, hopefully excellent start time, using the first time from our array
+    char start_time_code = START_TIME_CODE_DEFAULT; // fall back to this
+    int best_so_far = INT_MAX;
     int len = (int) clk_times.size();
-    int hh=1;   // default time is 1:30:00
-    if( len >= 1 && ((clk_times[0]>>16) & 0xff) != hh ) // a little protocol optimisation, starting with a Y code is special ...
-    {                                                   //  ... unlike subsequent Y codes, it sets hh for both sides
-        hh = ((clk_times[0]>>16) & 0xff);
-        encoded_clk_times += 'Y';
-        encoded_clk_times += ('0' + hh);
+    int clk_time = (len>0 ? clk_times[0] : -1);
+    if( clk_time != -1 )    // if not absent or filler
+    {
+        int s = ((clk_time>>16) & 0xff) * 3600 +
+                ((clk_time>>8) & 0xff) * 60 +
+                ( clk_time & 0xff);
+        for( int i=0; i<sizeof(start_time_codes)/sizeof(start_time_codes[0]); i++ )
+        {
+            int trial_s = 60 * start_time_codes[i];
+            int diff = trial_s - s;
+            if( diff < 0 )
+                diff = 0-diff;
+            if( diff < best_so_far )
+            {
+                best_so_far = diff;
+                start_time_code = START_TIME_CODE_MIN+i;
+            }
+        }
     }
-    int time_w = hh*3600 + 30*60;        // Start time for both sides 1:30 or if modified hh:30
-    int time_b = hh*3600 + 30*60;
+
+    // Look for if( i == 0 ) sections below to actually omit the start_time_code
+    //  (we don't do it now because we can often omit it)
+    int start_time_s = 60 * start_time_codes[start_time_code-START_TIME_CODE_MIN];
+
+    // Set the initial time, for encoding and decoding
+    int time_w = start_time_s;  // Start time for both sides
+    int time_b = start_time_s;
 
     // Loop taking one element (for absolute coding) or two for (delta coding) at a time
     for( int i=0; i<len; i++ )
@@ -337,6 +375,20 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         {
             if( !blitzing_mode )
             {
+
+                // Check the sad corner case of the last character is also the first character
+                if( i==0 )
+                {
+
+                    // If we want a start time other than default, prepend it
+                    if( start_time_code != START_TIME_CODE_DEFAULT )
+                        encoded_clk_times += start_time_code;
+
+                    // If we use default, we still need to prepend it if we start with something
+                    //  that looks like a start time code
+                    else if( START_TIME_CODE_MIN<=emit_abs[0] && emit_abs[0]<=START_TIME_CODE_MAX )
+                        encoded_clk_times += START_TIME_CODE_DEFAULT;
+                }
                 encoded_clk_times += emit_abs;
                 #ifdef BABY_DEBUG
                 printf( "ragged %06x %s\n", hhmmss1, emit_abs.c_str() );
@@ -351,7 +403,8 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
                 bool duration_coding = !filler1 && punc_encode( duration_w, duration_b, punc_code, baby_w, baby_b );
                 if( duration_coding && punc_code=='!' )
                 {
-                    encoded_clk_times += white ? baby_w : baby_b;
+                    encoded_clk_times += (white ? baby_w : baby_b);     // this is the only time baby_b can be
+                                                                        //  the first duration code
                     #ifdef BABY_DEBUG
                     printf( "ragged half duration %06x %s\n", hhmmss1, emit_abs.c_str() );
                     #endif
@@ -383,6 +436,10 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
             // Note that duration encoding may mean no hour updates are necessary when the
             //  hour changes
 
+            // If we want a start time other than default, prepend it
+            if( i==0 && start_time_code != START_TIME_CODE_DEFAULT )
+                encoded_clk_times += start_time_code;
+
             // Consume both
             i++;
             time_w -= duration_w;
@@ -392,7 +449,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
             if( !blitzing_mode || punc_code != '!' )
                 encoded_clk_times += punc_code;
             blitzing_mode = (punc_code == '!');
-            encoded_clk_times += baby_w;
+            encoded_clk_times += baby_w;    // baby_w always goes first, except now with our half duration situation above
             encoded_clk_times += baby_b;
             #ifdef BABY_DEBUG
             printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss1, hhmmss2, duration_w, duration_b, punc_code, baby_w, baby_b );
@@ -410,6 +467,17 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
                 // '!' makes no sense as a duration code in blitzing_mode, so use it to indicate
                 // blitzing_mode -> absolute instead.
             }
+            if( i==0 )
+            {
+                // If we want a start time other than default, prepend it
+                if( start_time_code != START_TIME_CODE_DEFAULT )
+                    encoded_clk_times += start_time_code;
+
+                // If we use default, we still need to prepend it if we start with something
+                //  that looks like a start time code
+                else if( START_TIME_CODE_MIN<=emit_abs[0] && emit_abs[0]<=START_TIME_CODE_MAX )
+                    encoded_clk_times += START_TIME_CODE_DEFAULT;
+            }
             encoded_clk_times += emit_abs;
             #ifdef BABY_DEBUG
             printf( "time_%c %06x %s\n", white?'w':'b', hhmmss1, emit_abs.c_str() );
@@ -421,18 +489,17 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
 //  For now the reverse procedure is a test only
 static void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &clk_times )
 {
-    enum {init,hour_initial,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_w,duration_b} state=init;
-    int hh_w=1,  hh_b=1;  // start times are 1:30:00, 90 minutes, 5400 seconds, by my decreed convention
-    int mm_w=30, mm_b=30;
-    int ss_w=0,  ss_b=0;
+    enum {init,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_w,duration_b} state=init;
     bool blitzing_mode = false;
     bool fall_through_half_duration_at_end = false;
-
-    // keep time in seconds, and its hh,mm,ss components in sync as state variables
-    int time_w = hh_w*3600 + mm_w*60 + ss_w;
-    int time_b = time_w;
     char punc_code, baby_w, baby_b;
     bool white_save;
+
+    // Keep time in seconds, and its hh,mm,ss components in sync as state variables
+    int time_w=0, time_b=0;
+    int hh_w=0,   hh_b=0;
+    int mm_w=0,   mm_b=0;
+    int ss_w=0,   ss_b=0;
     #ifdef BABY_DEBUG
     printf("\nclk_times_decode()\n" );
     #endif
@@ -446,30 +513,22 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
         #endif
         switch(state)
         {
-
-            // Some shenanigans right at the start, decode an initial "Yn" as setting
-            //  the hour for both white and black (usually Yn sets one or the other)
-            case hour_initial:
-            {
-                if( '0'<= c && c<='9' )
-                {
-                    hh_w = hh_b = c-'0';
-                    #ifdef BABY_DEBUG
-                    printf( " hour (both) %d ", hh_w );
-                    #endif
-                }
-                state = minute_w;   // head to the normal default
-                break;
-            }
             case init:
             {
-                state = minute_w; // fall through, unless ...
-                if( c == 'Y' )
-                {
-                    state = hour_initial;   // an initial Y code uniquely sets hh for both sides
-                    break;
-                }
-                // Fall through don't reorder init -> minute_w -> minute_b
+                // Set up our time state variables, even if the first code isn't
+                //  a starting time code
+                state = minute_w;   // next state, whether falling through or not
+                bool is_time_code = (START_TIME_CODE_MIN<=c && c<=START_TIME_CODE_MAX);
+                char start_time_code = START_TIME_CODE_DEFAULT;
+                if( is_time_code )
+                    start_time_code = c;
+                time_w = time_b = 60 * start_time_codes[start_time_code-START_TIME_CODE_MIN];
+                hh_w = hh_b = time_w/3600;
+                mm_w = mm_b = (time_w - hh_w*3600) / 60;
+                ss_w = ss_b = time_w%60;
+
+                // Fall through if it wasn't a time code;
+                if( is_time_code ) break;
             }
 
             // Normal start point, expect absolute encoding 1st baby code = minute, but also delta
@@ -508,6 +567,8 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                         blitzing_mode = (c == '!');
                         state = duration_w;
                         white_save = white; // save whether duration represents a (w,b) or (b,w) pair
+                                            // Note that this quite correctly is unchanged throughout
+                                            // blitzing mode
                     }
                 }
                 else if( blitzing_mode )
@@ -516,7 +577,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     baby_w = c;
                     state = duration_b;
                     if( !more )
-                        fall_through_half_duration_at_end = true;
+                        fall_through_half_duration_at_end = true;   // baby_b will correctly get the same value as baby_w
                 }
                 else
                 {
