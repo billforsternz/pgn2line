@@ -321,7 +321,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
     encoded_clk_times.clear();
     bool blitzing_mode=false;
 
-    // Set a good, hopefully excellent start time, using the first time from our array
+    // Set a good, hopefully excellent nominal start time, using the first time from our array
     char start_time_code = START_TIME_CODE_DEFAULT; // fall back to this
     int best_so_far = INT_MAX;
     int len = (int) clk_times.size();
@@ -345,13 +345,11 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         }
     }
 
-    // Look for if( i == 0 ) sections below to actually omit the start_time_code
-    //  (we don't do it now because we can often omit it)
-    int start_time_s = 60 * start_time_codes[start_time_code-START_TIME_CODE_MIN];
-
     // Set the initial time, for encoding and decoding
+    int start_time_s = 60 * start_time_codes[start_time_code-START_TIME_CODE_MIN];
     int time_w = start_time_s;  // Start time for both sides
     int time_b = start_time_s;
+    encoded_clk_times += start_time_code;
 
     // Loop taking one element (for absolute coding) or two for (delta coding) at a time
     for( int i=0; i<len; i++ )
@@ -376,19 +374,6 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
             if( !blitzing_mode )
             {
 
-                // Check the sad corner case of the last character is also the first character
-                if( i==0 )
-                {
-
-                    // If we want a start time other than default, prepend it
-                    if( start_time_code != START_TIME_CODE_DEFAULT )
-                        encoded_clk_times += start_time_code;
-
-                    // If we use default, we still need to prepend it if we start with something
-                    //  that looks like a start time code
-                    else if( START_TIME_CODE_MIN<=emit_abs[0] && emit_abs[0]<=START_TIME_CODE_MAX )
-                        encoded_clk_times += START_TIME_CODE_DEFAULT;
-                }
                 encoded_clk_times += emit_abs;
                 #ifdef BABY_DEBUG
                 printf( "ragged %06x %s\n", hhmmss1, emit_abs.c_str() );
@@ -436,10 +421,6 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
             // Note that duration encoding may mean no hour updates are necessary when the
             //  hour changes
 
-            // If we want a start time other than default, prepend it
-            if( i==0 && start_time_code != START_TIME_CODE_DEFAULT )
-                encoded_clk_times += start_time_code;
-
             // Consume both
             i++;
             time_w -= duration_w;
@@ -467,22 +448,23 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
                 // '!' makes no sense as a duration code in blitzing_mode, so use it to indicate
                 // blitzing_mode -> absolute instead.
             }
-            if( i==0 )
-            {
-                // If we want a start time other than default, prepend it
-                if( start_time_code != START_TIME_CODE_DEFAULT )
-                    encoded_clk_times += start_time_code;
-
-                // If we use default, we still need to prepend it if we start with something
-                //  that looks like a start time code
-                else if( START_TIME_CODE_MIN<=emit_abs[0] && emit_abs[0]<=START_TIME_CODE_MAX )
-                    encoded_clk_times += START_TIME_CODE_DEFAULT;
-            }
             encoded_clk_times += emit_abs;
             #ifdef BABY_DEBUG
             printf( "time_%c %06x %s\n", white?'w':'b', hhmmss1, emit_abs.c_str() );
             #endif
         }
+    }
+
+    // A little optimisation, if we use default start time, we omit it unless
+    // such omission would result in the first character of the BabyClk string
+    // happening to unhelpfully fall into the start time range
+    if( encoded_clk_times.length() < 2 )
+        encoded_clk_times.clear();  // start_time_code only, omit
+    else
+    {
+        bool in_range = (START_TIME_CODE_MIN<=encoded_clk_times[1] && encoded_clk_times[1]<=START_TIME_CODE_MAX);
+        if( start_time_code==START_TIME_CODE_DEFAULT && !in_range )
+            encoded_clk_times = encoded_clk_times.substr(1);    // omit
     }
 }
 
