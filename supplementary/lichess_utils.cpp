@@ -137,6 +137,16 @@ A subtlety worth stating explicitly - if a delta code crosses an hour boundary, 
 eliminates the need for a Y code - both encoder and decoder already agree on the new
 current value of the hour state variable.
 
+Just one more thing: Experience shows that '!' representing a delta pair in the range
+-30 to +30 seconds is extremely common. Strings of such pairs would appear both at
+the start and end of many games and throughout blitz games. So we now have an
+optimisation - '!' persists, successive '!' codes are implied and omitted, we call
+this "blitzing mode". Blitzing mode persists until a different punctuation code or a
+Y or Z code appears in the character stream. To end blitzing mode to transition to an
+absolute time we have to do something special, "wasting" a character. We insert a
+terminating '!'. This makes no sense as a duration code, since we are already in
+blitzing mode it's not needed in that role, so we use it for this special job.
+
 */
 
 // Some BabyClk options
@@ -325,12 +335,36 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         // If we don't have a second half, write this one out, we're done
         if( !more )
         {
-            if( blitzing_mode )
-                encoded_clk_times += '!';
-            encoded_clk_times += emit_abs;
-            #ifdef BABY_DEBUG
-            printf( "ragged %06x %s\n", hhmmss1, emit_abs.c_str() );
-            #endif
+            if( !blitzing_mode )
+            {
+                encoded_clk_times += emit_abs;
+                #ifdef BABY_DEBUG
+                printf( "ragged %06x %s\n", hhmmss1, emit_abs.c_str() );
+                #endif
+            }
+
+            // Now support a single character (half duration) if blitzing mode
+            //  can continue into the last clk time
+            else
+            {
+                char punc_code, baby_w, baby_b;
+                bool duration_coding = !filler1 && punc_encode( duration_w, duration_b, punc_code, baby_w, baby_b );
+                if( duration_coding && punc_code=='!' )
+                {
+                    encoded_clk_times += white ? baby_w : baby_b;
+                    #ifdef BABY_DEBUG
+                    printf( "ragged half duration %06x %s\n", hhmmss1, emit_abs.c_str() );
+                    #endif
+                }
+                else
+                {
+                    encoded_clk_times += '!';   // blitzing mode -> absolute mode
+                    encoded_clk_times += emit_abs;
+                    #ifdef BABY_DEBUG
+                    printf( "ragged %06x %s\n", hhmmss1, emit_abs.c_str() );
+                    #endif
+                }
+            }
             continue;
         }
 
@@ -392,6 +426,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
     int mm_w=30, mm_b=30;
     int ss_w=0,  ss_b=0;
     bool blitzing_mode = false;
+    bool fall_through_half_duration_at_end = false;
 
     // keep time in seconds, and its hh,mm,ss components in sync as state variables
     int time_w = hh_w*3600 + mm_w*60 + ss_w;
@@ -401,8 +436,11 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
     #ifdef BABY_DEBUG
     printf("\nclk_times_decode()\n" );
     #endif
-    for( char c: encoded_clk_times )
+    int len = (int)encoded_clk_times.length();
+    for( int i=0; i<len; i++ )
     {
+        bool more = (i+1<len);
+        char c = encoded_clk_times[i];
         #ifdef BABY_DEBUG
         printf("%c", c );
         #endif
@@ -477,6 +515,8 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     // We have effectively jumped straight to duration_w state
                     baby_w = c;
                     state = duration_b;
+                    if( !more )
+                        fall_through_half_duration_at_end = true;
                 }
                 else
                 {
@@ -487,52 +527,20 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                         mm_b = mm;
                     state = (white?second_w:second_b);
                 }
-                break;
-            }
-
-            // Get the 2nd character in absolute mode, representing seconds
-            case second_w:
-            case second_b:
-            {
-                bool white = (state==second_w);
-                int &hh = white ? hh_w : hh_b;
-                int &mm = white ? mm_w : mm_b;
-                int &ss = white ? ss_w : ss_b;
-                int &time = white ? time_w : time_b;
-                ss = baby_decode(c);
-                state = white ? minute_b : minute_w;
-                int hhmmss=0;
-                hhmmss =  ( ss      &     0xff);
-                hhmmss |= ((mm<<8)  &   0xff00);
-                hhmmss |= ((hh<<16) & 0xff0000);
-                #ifdef BABY_DEBUG
-                printf( " %06x\n", hhmmss );
-                #endif
-                clk_times.push_back(hhmmss);
-                time = hh*3600 + mm*60 + ss;
-                break;
-            }
-            
-            // Y code character changes the hour
-            case hour_w:
-            case hour_b:
-            {
-                bool white = (state==hour_w);
-                int &hh = white ? hh_w : hh_b;
-                hh = c-'0';
-                #ifdef BABY_DEBUG
-                printf( " hour_%c %d ", white?'w':'b' );
-                #endif
-                state = white?minute_w:minute_b;
-                break;
+                if( !fall_through_half_duration_at_end ) break;
             }
 
             // 1st baby code in delta code is always white delta
             case duration_w:
             {
-                baby_w = c;
-                state = duration_b;
-                break;
+                if( state == duration_b )
+                    ;   // allow fall through to duration_b
+                else
+                {
+                    baby_w = c;
+                    state = duration_b;
+                    break;
+                }
             }
 
             // 2nd and final baby code in delta code is always black delta
@@ -578,7 +586,45 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 printf( " %06x\n", val2 );
                 #endif
                 clk_times.push_back(val1);
-                clk_times.push_back(val2);
+                if( !fall_through_half_duration_at_end )
+                    clk_times.push_back(val2);
+                break;
+            }
+
+            // Get the 2nd character in absolute mode, representing seconds
+            case second_w:
+            case second_b:
+            {
+                bool white = (state==second_w);
+                int &hh = white ? hh_w : hh_b;
+                int &mm = white ? mm_w : mm_b;
+                int &ss = white ? ss_w : ss_b;
+                int &time = white ? time_w : time_b;
+                ss = baby_decode(c);
+                state = white ? minute_b : minute_w;
+                int hhmmss=0;
+                hhmmss =  ( ss      &     0xff);
+                hhmmss |= ((mm<<8)  &   0xff00);
+                hhmmss |= ((hh<<16) & 0xff0000);
+                #ifdef BABY_DEBUG
+                printf( " %06x\n", hhmmss );
+                #endif
+                clk_times.push_back(hhmmss);
+                time = hh*3600 + mm*60 + ss;
+                break;
+            }
+            
+            // Y code character changes the hour
+            case hour_w:
+            case hour_b:
+            {
+                bool white = (state==hour_w);
+                int &hh = white ? hh_w : hh_b;
+                hh = c-'0';
+                #ifdef BABY_DEBUG
+                printf( " hour_%c %d ", white?'w':'b' );
+                #endif
+                state = white?minute_w:minute_b;
                 break;
             }
         }
