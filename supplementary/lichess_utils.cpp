@@ -471,8 +471,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
 //  For now the reverse procedure is a test only
 static void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &clk_times )
 {
-    enum {init,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_w,duration_b} state=init;
-    bool blitzing_mode = false;
+    enum {init,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_w,duration_b,blitzing} state=init;
     bool fall_through_half_duration_at_end = false;
     char punc_code, baby_w, baby_b;
     bool white_save;
@@ -528,38 +527,18 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     #endif
                     clk_times.push_back(-1);    // Z = filler for absent clock time
                     state = white?minute_b:minute_w;
-                    blitzing_mode = false;
                 }
                 else if( c == 'Y' )
                 {
                     state = (white?hour_w:hour_b);
-                    blitzing_mode = false;
                 }
                 else if( punc_idx(c,idx) )
                 {
                     punc_code = c;
-                    if( c == '!' && blitzing_mode )
-                    {
-                        blitzing_mode = false;  // have to waste a character ending blitzing mode sometimes
-                        // '!' makes no sense as a duration code in blitzing_mode, so use it to indicate
-                        // blitzing_mode -> absolute instead. Stay in same state, mm ss are coming next
-                    }
-                    else
-                    {
-                        blitzing_mode = (c == '!');
-                        state = duration_w;
-                        white_save = white; // save whether duration represents a (w,b) or (b,w) pair
-                                            // Note that this quite correctly is unchanged throughout
-                                            // blitzing mode
-                    }
-                }
-                else if( blitzing_mode )
-                {
-                    // We have effectively jumped straight to duration_w state
-                    baby_w = c;
-                    state = duration_b;
-                    if( !more )
-                        fall_through_half_duration_at_end = true;   // baby_b will correctly get the same value as baby_w
+                    state = duration_w;
+                    white_save = white; // save whether duration represents a (w,b) or (b,w) pair
+                                        // Note that this quite correctly is unchanged throughout
+                                        // blitzing mode
                 }
                 else
                 {
@@ -570,27 +549,67 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                         mm_b = mm;
                     state = (white?second_w:second_b);
                 }
-                if( !fall_through_half_duration_at_end ) break;
+                break;
             }
 
-            // 1st baby code in delta code is always white delta
-            case duration_w:
+            // Blitzing is implied '!' -> duration_w, so like duration_w but other things
+            //  can happen
+            case blitzing:
             {
-                if( state == duration_b )
-                    ;   // allow fall through to duration_b
+                int idx = 0;
+                bool fall_through = false;
+
+                // Y and Z codes exit blitzing
+                if( c == 'Z' )
+                {
+                    #ifdef BABY_DEBUG
+                    printf( " add filler\n" );
+                    #endif
+                    clk_times.push_back(-1);    // Z = filler for absent clock time
+                    state = white_save ? minute_b : minute_w;
+                }
+                else if( c == 'Y' )
+                {
+                    state = (white_save ? hour_w : hour_b);
+                }
+
+                // '!' exits blitzing (protocol trick, '!' is not needed as a duration
+                //   code during blitzing, so use it for blitzing -> absolute transition)
+                else if( c == '!' )
+                {
+                    state = white_save ? minute_w : minute_b;   // just exit blitzing
+                }
+                
+                // Other duration codes stay in duration coding, but not blitzing
+                else if( punc_idx(c,idx) )
+                {
+                    punc_code = c;
+                    state = duration_w;
+                }
+
+                // Else must be a baby code, fall through to duration_w
                 else
                 {
-                    baby_w = c;
-                    state = duration_b;
-                    break;
+                    fall_through = true;
                 }
+                if( !fall_through ) break;
+            }
+
+            // 1st delta baby code
+            case duration_w:
+            {
+                baby_w = c;
+                state = duration_b;
+                if( !more )
+                    fall_through_half_duration_at_end = true;   // baby_b will correctly get the same value as baby_w
+                if( !fall_through_half_duration_at_end ) break;
             }
 
             // 2nd and final baby code in delta code is always black delta
             case duration_b:
             {
                 baby_b = c;
-                state = white_save?minute_w:minute_b;
+                state = (punc_code=='!' ? blitzing : (white_save?minute_w:minute_b));
                 int dur_w, dur_b;
                 punc_decode(punc_code,baby_w,baby_b,dur_w,dur_b);
                 #ifdef BABY_DEBUG
@@ -665,7 +684,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 int &hh = white ? hh_w : hh_b;
                 hh = c-'0';
                 #ifdef BABY_DEBUG
-                printf( " hour_%c %d ", white?'w':'b' );
+                printf( " hour_%c %d ", white?'w':'b', hh );
                 #endif
                 state = white?minute_w:minute_b;
                 break;
