@@ -14,4 +14,7 @@ void key_add( std::string &header, const std::string key, const std::string val 
 void key_update( std::string &header, const std::string key, const std::string key_insert_after, const std::string val );
 void key_update2( std::string &header, const std::string key, const std::string key_insert_after1,
                                                               const std::string key_insert_after2, const std::string val );
+void key_update_subkey( std::string &header, const std::string key, const std::string subkey, const std::string subval );
+bool key_find_subkey( std::string &header, const std::string key, const std::string subkey, std::string &subval );
+void key_update_subfield( std::string &header, const std::string key, const std::string subfield );
 #endif

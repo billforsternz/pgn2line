@@ -210,21 +210,76 @@ static int baby_decode( char baby )
 
 // Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios, all combinations of
 //  both players durations when they both fit in the same 5 minute window
-static const char *punc = "!#$%&()*+,-.:;<=>?^_`{|}~";  // one benefit; avoids /\"'[] and Z
+static const char *punc_encode_lookup  = "!#$%&()*+,-.:;<=>?^_`{|}~";
+static const char *combi_encode_lookup = "!#$%&()*+,-.:;<=>?^_`{|}~WVUTSRQPONMLKJIHGFEDCBAzywvutsrqponmlkjihgfedcba9876543210X";
 
-// Punctuation code -> idx in range 0-24
-static bool punc_idx( char in, int &idx )
+// Combi encoding, combine punc codes and baby codes to give up to 81 (9x9) characters
+static bool is_baby( char c );
+static bool is_punc( char c );
+static bool is_combi( char c );
+static char combi_encode( int val );
+static int  combi_decode( char combi );
+static char combi_encode( int val );
+static int  combi_decode( char combi );
+static int  punc_decode_lookup[128];
+static int  combi_decode_lookup[128];
+static void decode_lookup_tables_build()
 {
-    idx = -1;
-    for( int i=0; punc[i]; i++ )
+    static bool tables_built;
+    if( tables_built )
+        return;
+    tables_built = true;
+    const char *s = combi_encode_lookup;
+    for( int i=0; i<85; i++ )
     {
-        if( punc[i] == in )
-        {
-            idx = i;
-            break;
-        }
+        char c = *s++;
+        combi_decode_lookup[c] = i;
+        if( i < 25 )
+            punc_decode_lookup[c] = i;
     }
-    return idx >= 0;
+}
+
+static char combi_encode( int val )
+{
+    return combi_encode_lookup[val];
+}
+
+static int combi_decode( char combi )
+{
+    decode_lookup_tables_build();       
+    int val = combi_decode_lookup[combi];
+    return val;
+}
+
+static char punc_encode( int val )
+{
+    return punc_encode_lookup[val];
+}
+
+static int punc_decode( char punc )
+{
+    decode_lookup_tables_build();       
+    int val = punc_decode_lookup[punc];
+    return val;
+}
+
+static bool is_baby( char c )
+{
+    return ('0'<=c && c<='9') || ('a'<=c && c<='z') || ('A'<=c && c<='X');
+}
+
+static bool is_punc( char c )
+{
+    if( c == '!' )
+        return true;
+    decode_lookup_tables_build();       
+    int val = punc_decode_lookup[c];
+    return val != 0;
+}
+
+static bool is_combi( char c )
+{
+    return is_punc(c) || is_baby(c);
 }
 
 // If possible, encode durations as three characters a punctuation lead in code, then two baby codes
@@ -240,7 +295,7 @@ static bool punc_encode( int duration_w, int duration_b, char &punc_code, char &
         int min_b = duration_b/60;
         int sec_b = duration_b%60;
         int idx  = 5*min_w + min_b; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 24
-        punc_code = punc[idx];
+        punc_code = punc_encode(idx);
         baby_w = baby_encode(sec_w);
         baby_b = baby_encode(sec_b);
     }
@@ -250,9 +305,8 @@ static bool punc_encode( int duration_w, int duration_b, char &punc_code, char &
 // Decode duration coding
 static bool punc_decode( char punc_code, char baby_w, char baby_b, int &duration_w, int &duration_b )
 {
-    int idx = -1;
-    bool ok = punc_idx( punc_code, idx );
-    if( !ok ) return false;
+    if( !is_punc(punc_code) ) return false;
+    int idx = punc_decode(punc_code);
     int seconds_w = baby_decode(baby_w);
     int seconds_b = baby_decode(baby_b);
     int min_w = idx/5;
@@ -261,7 +315,7 @@ static bool punc_decode( char punc_code, char baby_w, char baby_b, int &duration
     duration_b = min_b*60 + seconds_b;
     duration_w -= DURATION_OFFSET;
     duration_b -= DURATION_OFFSET;
-    return ok;
+    return true;
 }
 
 // Split hhmmss into components and calculate duration
@@ -485,7 +539,6 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
             case minute_b:
             {
                 bool white = (state==minute_w);
-                int idx;
                 if( c == 'Z' )
                 {
                     #ifdef BABY_DEBUG
@@ -498,7 +551,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 {
                     state = (white?hour_w:hour_b);
                 }
-                else if( punc_idx(c,idx) )
+                else if( is_punc(c) )
                 {
                     punc_code = c;
                     state = duration_w;
@@ -506,7 +559,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                                         // Note that this quite correctly is unchanged throughout
                                         // blitzing mode
                 }
-                else
+                else // if( is_baby(c) )    // only codes left
                 {
                     int mm = baby_decode(c);
                     if( white )
@@ -547,7 +600,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 }
                 
                 // Other duration codes stay in duration coding, but not blitzing
-                else if( punc_idx(c,idx) )
+                else if( is_punc(c) )
                 {
                     punc_code = c;
                     state = duration_w;

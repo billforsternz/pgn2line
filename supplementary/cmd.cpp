@@ -1296,6 +1296,18 @@ struct GAME2
                 }
                 if( nz_tournament || nz_game )
                 {
+                    if( nz_tournament )
+                    {
+                        std::string val;
+                        bool we_have_updated_date = key_find_subkey( header, "AlgoUpdates", "Date", val );
+                        if( we_have_updated_date )
+                        {
+                            printf( "@@@ %s\n", val.c_str() );
+                            // TODO improve the Date to NZ time approx
+                            if( val == "UTCDate" )
+                                key_update_subkey( header, "AlgoUpdates", "Date", "NZGame" );
+                        }
+                    }
                     util::putline(out,header+moves);
                     nbr_games_found++;
                 }
@@ -1338,6 +1350,7 @@ int cmd_lichess_broadcast_improve( std::ifstream &in, std::ofstream &out )
         if( ok && ok2 && (util::prefix(event,"Round ") || util::prefix(event,"Game ")) )
         {
             key_replace(header,"Event",name);
+            key_update_subkey(header,"AlgoUpdates","Event","Broadcast");
         }
         std::string date;
         std::string utc_date;
@@ -1346,6 +1359,7 @@ int cmd_lichess_broadcast_improve( std::ifstream &in, std::ofstream &out )
         if( !ok && ok2 )
         {
             key_update(header,"Date","Site",utc_date);
+            key_update_subkey(header,"AlgoUpdates","Date","UTCDate");
         }
         util::putline(out,header+moves);
     }

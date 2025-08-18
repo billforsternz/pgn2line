@@ -659,10 +659,8 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                                            i==0?"Result":"WhiteFideId",
                                            "Result",
                                            s);
-                        key_update(header,i==0?"WhiteFideIdPropogateSource":"BlackFideIdPropogateSource",
-                                           i==0?"WhiteFideId":"BlackFideId",
-                                           tier_txt[match_tier] );
-
+                        key_update_subkey( header, "AlgoUpdates", i==0?"WhiteFideId":"BlackFideId",
+                                            tier_short_txt[match_tier] );
                     }
                 }
 
