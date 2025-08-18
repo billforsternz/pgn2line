@@ -283,7 +283,7 @@ static bool is_combi( char c )
 }
 
 // If possible, encode durations as three characters a punctuation lead in code, then two baby codes
-static bool punc_encode( int duration_w, int duration_b, char &punc_code, char &baby_w, char &baby_b )
+static bool duration_encode( int duration_w, int duration_b, char &punc_code, char &baby_w, char &baby_b )
 {
     duration_w += DURATION_OFFSET;
     duration_b += DURATION_OFFSET;
@@ -303,9 +303,10 @@ static bool punc_encode( int duration_w, int duration_b, char &punc_code, char &
 }
 
 // Decode duration coding
-static bool punc_decode( char punc_code, char baby_w, char baby_b, int &duration_w, int &duration_b )
+static bool duration_decode( char punc_code, char baby_w, char baby_b, int &duration_w, int &duration_b )
 {
-    if( !is_punc(punc_code) ) return false;
+    if( !is_punc(punc_code) )
+        return false;
     int idx = punc_decode(punc_code);
     int seconds_w = baby_decode(baby_w);
     int seconds_b = baby_decode(baby_b);
@@ -432,7 +433,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         char punc_code, baby_w, baby_b;
         if( !more )
             duration2 = duration1;  // set both durations to the first duration if !more
-        bool duration_coding = !filler1 && !filler2 && punc_encode( duration_w, duration_b, punc_code, baby_w, baby_b );
+        bool duration_coding = !filler1 && !filler2 && duration_encode( duration_w, duration_b, punc_code, baby_w, baby_b );
 
         // If duration coding , consume both elements
         if( duration_coding )
@@ -630,7 +631,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 baby_b = c;
                 state = (punc_code=='!' ? blitzing : (white_save?minute_w:minute_b));
                 int dur_w, dur_b;
-                punc_decode(punc_code,baby_w,baby_b,dur_w,dur_b);
+                duration_decode(punc_code,baby_w,baby_b,dur_w,dur_b);
                 #ifdef BABY_DEBUG
                 printf( " %d %d", dur_w, dur_b );
                 #endif
