@@ -363,22 +363,21 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         int hh=0,mm=0,ss=0;
 
         // Encode first half
-        int &time     = white ? time_w     : time_b;
-        int &duration = white ? duration_w : duration_b;
-        bool filler1 = clk_times_calc_duration( time, hhmmss1, hh, mm, ss, duration );
-        clk_times_encode_ply( filler1, time, hh, mm, ss, emit_abs );
+        int &time1     = white ? time_w     : time_b;
+        int &duration1 = white ? duration_w : duration_b;
+        bool filler1 = clk_times_calc_duration( time1, hhmmss1, hh, mm, ss, duration1 );
+        clk_times_encode_ply( filler1, time1, hh, mm, ss, emit_abs );
 
-        // Calculate second half duration
+        // Calculate second half duration (fake it if !more)
         int hhmmss2 = more ? clk_times[i+1] : 0;
-        bool filler2 = white ? clk_times_calc_duration( time_b, hhmmss2, hh, mm, ss, duration_b )
-                             : clk_times_calc_duration( time_w, hhmmss2, hh, mm, ss, duration_w );
+        int &time2     = white ? time_b     : time_w;
+        int &duration2 = white ? duration_b : duration_w;
+        bool filler2 = clk_times_calc_duration( time2, hhmmss2, hh, mm, ss, duration2 );
 
         // Do duration coding if possible
         char punc_code, baby_w, baby_b;
-        if( !more && white )
-            duration_b = duration_w;
-        else if( !more )
-            duration_w = duration_b;
+        if( !more )
+            duration2 = duration1;  // set both durations to the first duration if !more
         bool duration_coding = !filler1 && !filler2 && punc_encode( duration_w, duration_b, punc_code, baby_w, baby_b );
 
         // If duration coding , consume both elements
@@ -396,9 +395,9 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
             if( !blitzing_mode || punc_code != '!' )
                 encoded_clk_times += punc_code;
             blitzing_mode = (punc_code == '!');
-            encoded_clk_times += baby_w;    // baby_w always goes first, except now with our half duration situation above
+            encoded_clk_times += baby_w;    // baby_w always goes first, unless !more
             if( more )
-                encoded_clk_times += baby_b;
+                encoded_clk_times += baby_b;    // if !more baby_b and baby_w are the same value
             #ifdef BABY_DEBUG
             printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss1, hhmmss2, duration_w, duration_b, punc_code, baby_w, more?baby_b:' ' );
             #endif
@@ -407,7 +406,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         // Else if absolute coding , consume just one element
         else
         {
-            time -= duration;
+            time1 -= duration1;
             if( blitzing_mode )
             {
                 blitzing_mode = false;
