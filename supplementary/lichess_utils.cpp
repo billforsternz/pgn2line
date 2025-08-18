@@ -368,51 +368,17 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         bool filler1 = clk_times_calc_duration( time, hhmmss1, hh, mm, ss, duration );
         clk_times_encode_ply( filler1, time, hh, mm, ss, emit_abs );
 
-        // If we don't have a second half, write this one out, we're done
-        if( !more )
-        {
-            if( !blitzing_mode )
-            {
-
-                encoded_clk_times += emit_abs;
-                #ifdef BABY_DEBUG
-                printf( "ragged %06x %s\n", hhmmss1, emit_abs.c_str() );
-                #endif
-            }
-
-            // Now support a single character (half duration) if blitzing mode
-            //  can continue into the last clk time
-            else
-            {
-                char punc_code, baby_w, baby_b;
-                bool duration_coding = !filler1 && punc_encode( duration_w, duration_b, punc_code, baby_w, baby_b );
-                if( duration_coding && punc_code=='!' )
-                {
-                    encoded_clk_times += (white ? baby_w : baby_b);     // this is the only time baby_b can be
-                                                                        //  the first duration code
-                    #ifdef BABY_DEBUG
-                    printf( "ragged half duration %06x %s\n", hhmmss1, emit_abs.c_str() );
-                    #endif
-                }
-                else
-                {
-                    encoded_clk_times += '!';   // blitzing mode -> absolute mode
-                    encoded_clk_times += emit_abs;
-                    #ifdef BABY_DEBUG
-                    printf( "ragged %06x %s\n", hhmmss1, emit_abs.c_str() );
-                    #endif
-                }
-            }
-            continue;
-        }
-
         // Calculate second half duration
-        int hhmmss2 = clk_times[i+1];
+        int hhmmss2 = more ? clk_times[i+1] : 0;
         bool filler2 = white ? clk_times_calc_duration( time_b, hhmmss2, hh, mm, ss, duration_b )
                              : clk_times_calc_duration( time_w, hhmmss2, hh, mm, ss, duration_w );
 
         // Do duration coding if possible
         char punc_code, baby_w, baby_b;
+        if( !more && white )
+            duration_b = duration_w;
+        else if( !more )
+            duration_w = duration_b;
         bool duration_coding = !filler1 && !filler2 && punc_encode( duration_w, duration_b, punc_code, baby_w, baby_b );
 
         // If duration coding , consume both elements
@@ -431,9 +397,10 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
                 encoded_clk_times += punc_code;
             blitzing_mode = (punc_code == '!');
             encoded_clk_times += baby_w;    // baby_w always goes first, except now with our half duration situation above
-            encoded_clk_times += baby_b;
+            if( more )
+                encoded_clk_times += baby_b;
             #ifdef BABY_DEBUG
-            printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss1, hhmmss2, duration_w, duration_b, punc_code, baby_w, baby_b );
+            printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss1, hhmmss2, duration_w, duration_b, punc_code, baby_w, more?baby_b:' ' );
             #endif
         }
 
