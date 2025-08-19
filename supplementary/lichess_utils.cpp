@@ -167,6 +167,7 @@ character instead of three ('!' to leave blitzing mode plus mm and ss baby codes
                             //  negative deltas are very useful for blitzed out moves. If two
                             //  consecutive clk values are BOTH in the golden range we can encode
                             //  both in 3 bytes.
+#define DELTA_RANGE 5
 
 // Convert number from 0-59 to alphanumeric character
 //  I'm calling this Babylonian codes, baby codes for short (especially as the idea
@@ -211,43 +212,43 @@ static int baby_decode( char baby )
 // Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios, all combinations of
 //  both players durations when they both fit in the same 5 minute window
 static const char *punc_encode_lookup  = "!#$%&()*+,-.:;<=>?^_`{|}~";
-static const char *combi_encode_lookup = "!#$%&()*+,-.:;<=>?^_`{|}~WVUTSRQPONMLKJIHGFEDCBAzywvutsrqponmlkjihgfedcba9876543210X";
+static const char *delta_encode_lookup = "!#$%&()*+,-.:;<=>?^_`{|}~WVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkjihgfedcba9876543210X";
 
-// Combi encoding, combine punc codes and baby codes to give up to 81 (9x9) characters
+// Delta encoding, combine punc codes and baby codes to give up to 81 (9x9) characters
 static bool is_baby( char c );
 static bool is_punc( char c );
-static bool is_combi( char c );
-static char combi_encode( int val );
-static int  combi_decode( char combi );
-static char combi_encode( int val );
-static int  combi_decode( char combi );
+static bool is_delta( char c );
+static char delta_encode( int val );
+static int  delta_decode( char delta );
+static char punc_encode( int val );
+static int  punc_decode( char punc );
 static int  punc_decode_lookup[128];
-static int  combi_decode_lookup[128];
+static int  delta_decode_lookup[128];
 static void decode_lookup_tables_build()
 {
     static bool tables_built;
     if( tables_built )
         return;
     tables_built = true;
-    const char *s = combi_encode_lookup;
+    const char *s = delta_encode_lookup;
     for( int i=0; i<85; i++ )
     {
         char c = *s++;
-        combi_decode_lookup[c] = i;
+        delta_decode_lookup[c] = i;
         if( i < 25 )
             punc_decode_lookup[c] = i;
     }
 }
 
-static char combi_encode( int val )
+static char delta_encode( int val )
 {
-    return combi_encode_lookup[val];
+    return delta_encode_lookup[val];
 }
 
-static int combi_decode( char combi )
+static int delta_decode( char delta )
 {
     decode_lookup_tables_build();       
-    int val = combi_decode_lookup[combi];
+    int val = delta_decode_lookup[delta];
     return val;
 }
 
@@ -277,41 +278,49 @@ static bool is_punc( char c )
     return val != 0;
 }
 
-static bool is_combi( char c )
+static bool is_delta( char c )
 {
-    return is_punc(c) || is_baby(c);
+    if( c >= sizeof(delta_decode_lookup) )
+        return false;
+    if( c == '!' )
+        return true;
+    decode_lookup_tables_build();       
+    int val = delta_decode_lookup[c];
+    return val < (DELTA_RANGE*DELTA_RANGE);
 }
 
 // If possible, encode durations as three characters a punctuation lead in code, then two baby codes
-static bool duration_encode( int duration_w, int duration_b, char &punc_code, char &baby_w, char &baby_b )
+static bool duration_encode( int duration_w, int duration_b, char &delta_code, char &baby_w, char &baby_b )
 {
     duration_w += DURATION_OFFSET;
     duration_b += DURATION_OFFSET;
-    bool ok = (0<=duration_w && duration_w<5*60 && 0<=duration_b && duration_b<5*60);
+    bool ok = (0<=duration_w && duration_w<DELTA_RANGE*60 && 0<=duration_b && duration_b<DELTA_RANGE*60);
     if( ok )
     {
         int min_w = duration_w/60;
         int sec_w = duration_w%60;
         int min_b = duration_b/60;
         int sec_b = duration_b%60;
-        int idx  = 5*min_w + min_b; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 24
-        punc_code = punc_encode(idx);
+        int idx  = DELTA_RANGE*min_w + min_b; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 24
+        delta_code = delta_encode(idx);
         baby_w = baby_encode(sec_w);
         baby_b = baby_encode(sec_b);
+        // if( delta_code == '!' && baby_w=='g' && baby_b=='z' )
+        //     printf( "Debug\n" );
     }
     return ok;
 }
 
 // Decode duration coding
-static bool duration_decode( char punc_code, char baby_w, char baby_b, int &duration_w, int &duration_b )
+static bool duration_decode( char delta_code, char baby_w, char baby_b, int &duration_w, int &duration_b )
 {
-    if( !is_punc(punc_code) )
+    if( !is_delta(delta_code) )
         return false;
-    int idx = punc_decode(punc_code);
+    int idx = delta_decode(delta_code);
     int seconds_w = baby_decode(baby_w);
     int seconds_b = baby_decode(baby_b);
-    int min_w = idx/5;
-    int min_b = idx%5;
+    int min_w = idx/DELTA_RANGE;
+    int min_b = idx%DELTA_RANGE;
     duration_w = min_w*60 + seconds_w;
     duration_b = min_b*60 + seconds_b;
     duration_w -= DURATION_OFFSET;
@@ -338,7 +347,7 @@ static bool clk_times_calc_duration( int time, int hhmmss, int &hh, int &mm, int
 }
 
 // Encode absolute time hhmmss
-static void clk_times_encode_ply( bool filler, int time, int hh, int mm, int ss, std::string &out )
+static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss, std::string &out )
 {
     out.clear();
     if( filler )
@@ -347,12 +356,19 @@ static void clk_times_encode_ply( bool filler, int time, int hh, int mm, int ss,
         return;
     }
 
+    // Encode minutes
+    char baby = baby_encode(mm);
+
     // Encode hour changes, this is an exception, it doesn't happen often
     if( hh != (time/3600) )
         out += util::sprintf("Y%c", '0'+hh );
 
-    // Encode minutes
-    char baby = baby_encode(mm);
+    // Absolute codes always follow Y codes, and otherwise we need an 'X' to lead in to
+    //  the absolute minute and second baby codes
+    #if DELTA_RANGE > 5
+    else if( is_delta(baby) || baby=='X' )  // if the baby code is not unambiguous
+        out += 'X'; // sentinel
+    #endif
     out += baby;
 
     // Encode seconds
@@ -421,7 +437,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         int &time1     = white ? time_w     : time_b;
         int &duration1 = white ? duration_w : duration_b;
         bool filler1 = clk_times_calc_duration( time1, hhmmss1, hh, mm, ss, duration1 );
-        clk_times_encode_ply( filler1, time1, hh, mm, ss, emit_abs );
+        clk_times_encode_abs( filler1, time1, hh, mm, ss, emit_abs );
 
         // Calculate second half duration (fake it if !more)
         int hhmmss2 = more ? clk_times[i+1] : 0;
@@ -430,10 +446,10 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
         bool filler2 = clk_times_calc_duration( time2, hhmmss2, hh, mm, ss, duration2 );
 
         // Do duration coding if possible
-        char punc_code, baby_w, baby_b;
+        char delta_code, baby_w, baby_b;
         if( !more )
             duration2 = duration1;  // set both durations to the first duration if !more
-        bool duration_coding = !filler1 && !filler2 && duration_encode( duration_w, duration_b, punc_code, baby_w, baby_b );
+        bool duration_coding = !filler1 && !filler2 && duration_encode( duration_w, duration_b, delta_code, baby_w, baby_b );
 
         // If duration coding , consume both elements
         if( duration_coding )
@@ -447,14 +463,17 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
             time_b -= duration_b;
 
             // New optimization, blitzing_mode, '!' punctuation persists
-            if( !blitzing_mode || punc_code != '!' )
-                encoded_clk_times += punc_code;
-            blitzing_mode = (punc_code == '!');
+            if( blitzing_mode && !is_punc(delta_code) )
+                encoded_clk_times += '!';   // transition from blitzing to non punc delta code needs something
+                                            //  to indicate delta code is not baby coded mm in blitzing mode
+            if( !blitzing_mode || delta_code != '!' )
+                encoded_clk_times += delta_code;
+            blitzing_mode = (delta_code == '!');
             encoded_clk_times += baby_w;    // baby_w always goes first, unless !more
             if( more )
                 encoded_clk_times += baby_b;    // if !more baby_b and baby_w are the same value
             #ifdef BABY_DEBUG
-            printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss1, hhmmss2, duration_w, duration_b, punc_code, baby_w, more?baby_b:' ' );
+            printf( "duration %06x %06x %d %d %c%c%c\n", hhmmss1, hhmmss2, duration_w, duration_b, delta_code, baby_w, more?baby_b:' ' );
             #endif
         }
 
@@ -465,7 +484,8 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
             if( blitzing_mode )
             {
                 blitzing_mode = false;
-                encoded_clk_times += '!';   // need something to terminate blitzing_mode
+                if( emit_abs[0] != 'Y' )
+                    encoded_clk_times += '!';   // need something to terminate blitzing_mode
                 // '!' makes no sense as a duration code in blitzing_mode, so use it to indicate
                 // blitzing_mode -> absolute instead.
             }
@@ -492,7 +512,7 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
 //  For now the reverse procedure is a test only
 static void clk_times_decode( const std::string &encoded_clk_times, std::vector<int> &clk_times )
 {
-    enum {init,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_w,duration_b,blitzing} state=init;
+    enum {init,delta_w,delta_b,hour_w,hour_b,minute_w,second_w,minute_b,second_b,duration_w,duration_b,blitzing} state=init;
     bool fall_through_half_duration_at_end = false;
     char punc_code, baby_w, baby_b;
     bool white_save;
@@ -510,6 +530,8 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
     {
         bool more = (i+1<len);
         char c = encoded_clk_times[i];
+        // if( c=='i' && more && encoded_clk_times[i+1] =='v' )
+        //    printf( "DEBUG\n" );
         #ifdef BABY_DEBUG
         printf("%c", c );
         #endif
@@ -519,7 +541,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
             {
                 // Set up our time state variables, even if the first code isn't
                 //  a starting time code
-                state = minute_w;   // next state, whether falling through or not
+                state = delta_w;   // next state, whether falling through or not
                 bool is_time_code = (START_TIME_CODE_MIN<=c && c<=START_TIME_CODE_MAX);
                 char start_time_code = START_TIME_CODE_DEFAULT;
                 if( is_time_code )
@@ -533,26 +555,33 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 if( is_time_code ) break;
             }
 
-            // Normal start point, expect absolute encoding 1st baby code = minute, but also delta
-            //  encoding, filler, and Y codes
+            // Normal start point, expect start of a delta coded triplet by default
             default:
-            case minute_w:
-            case minute_b:
+            case delta_w:
+            case delta_b:
             {
-                bool white = (state==minute_w);
+                bool white = (state==delta_w);
                 if( c == 'Z' )
                 {
                     #ifdef BABY_DEBUG
                     printf( " add filler\n" );
                     #endif
                     clk_times.push_back(-1);    // Z = filler for absent clock time
-                    state = white?minute_b:minute_w;
+                    state = white?delta_b:delta_w;
                 }
                 else if( c == 'Y' )
                 {
+                    // Path 1 to absolute encoding
                     state = (white?hour_w:hour_b);
                 }
-                else if( is_punc(c) )
+                #if DELTA_RANGE > 5
+                else if( c == 'X' )
+                {
+                    // Path 2 to absolute encoding
+                    state = (white?minute_w:minute_b);
+                }
+                #endif
+                else if( is_delta(c) )
                 {
                     punc_code = c;
                     state = duration_w;
@@ -560,8 +589,9 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                                         // Note that this quite correctly is unchanged throughout
                                         // blitzing mode
                 }
-                else // if( is_baby(c) )    // only codes left
+                else // if( is_baby(c) )    // only baby codes left
                 {
+                    // Path 3 to absolute encoding
                     int mm = baby_decode(c);
                     if( white )
                         mm_w = mm;
@@ -572,13 +602,26 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 break;
             }
 
+            // Absolute encoding
+            case minute_w:
+            case minute_b:
+            {
+                bool white = (state==minute_w);
+                int mm = baby_decode(c);
+                if( white )
+                    mm_w = mm;
+                else
+                    mm_b = mm;
+                state = (white?second_w:second_b);
+                break;
+            }
+
             // Blitzing is implied '!' -> duration_w, so like duration_w but other things
             //  can happen
             case blitzing:
             {
                 int idx = 0;
                 bool fall_through = false;
-
                 // Y and Z codes exit blitzing
                 if( c == 'Z' )
                 {
@@ -586,7 +629,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     printf( " add filler\n" );
                     #endif
                     clk_times.push_back(-1);    // Z = filler for absent clock time
-                    state = white_save ? minute_b : minute_w;
+                    state = white_save ? delta_b : delta_w;
                 }
                 else if( c == 'Y' )
                 {
@@ -597,10 +640,10 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 //   code during blitzing, so use it for blitzing -> absolute transition)
                 else if( c == '!' )
                 {
-                    state = white_save ? minute_w : minute_b;   // just exit blitzing
+                    state = white_save ? delta_w : delta_b;   // just exit blitzing
                 }
                 
-                // Other duration codes stay in duration coding, but not blitzing
+                // Other punc codes stay in duration coding, but not blitzing
                 else if( is_punc(c) )
                 {
                     punc_code = c;
@@ -629,7 +672,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
             case duration_b:
             {
                 baby_b = c;
-                state = (punc_code=='!' ? blitzing : (white_save?minute_w:minute_b));
+                state = (punc_code=='!' ? blitzing : (white_save?delta_w:delta_b));
                 int dur_w, dur_b;
                 duration_decode(punc_code,baby_w,baby_b,dur_w,dur_b);
                 #ifdef BABY_DEBUG
@@ -683,7 +726,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 int &ss = white ? ss_w : ss_b;
                 int &time = white ? time_w : time_b;
                 ss = baby_decode(c);
-                state = white ? minute_b : minute_w;
+                state = white ? delta_b : delta_w;
                 int hhmmss=0;
                 hhmmss =  ( ss      &     0xff);
                 hhmmss |= ((mm<<8)  &   0xff00);
@@ -773,6 +816,7 @@ int lichess_moves_to_normal_pgn( const std::string &header, const std::string &m
             {
                 printf( "0x%06x, 0x%06x %s\n", clk_times[i], temp[i], clk_times[i]==temp[i] ? "pass" : "fail");
             }
+            exit(-1);
         }
     }
     else
