@@ -162,7 +162,7 @@ character instead of three ('!' to leave blitzing mode plus mm and ss baby codes
 */
 
 // Some BabyClk options
-// #define BABY_DEBUG
+//#define BABY_DEBUG
 #define DURATION_OFFSET 30  // defines our 5 minute delta duration window as [-30,4:30) the short
                             //  negative deltas are very useful for blitzed out moves. If two
                             //  consecutive clk values are BOTH in the golden range we can encode
@@ -211,8 +211,9 @@ static int baby_decode( char baby )
 
 // Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios, all combinations of
 //  both players durations when they both fit in the same 5 minute window
-static const char *punc_encode_lookup  = "!#$%&()*+,-.:;<=>?^_`{|}~";
-static const char *delta_encode_lookup = "!#$%&()*+,-.:;<=>?^_`{|}~WVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkjihgfedcba9876543210X";
+// static const char *punc_encode_lookup  = "!#$%&()*+,-.:;<=>?^_`{|}~";
+static const char *delta_encode_lookup = "!#$%&()*+,-.:;<=>?^_`{|}~WVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkjihgfedcba9876543";
+static const char *punc_encode_lookup  = delta_encode_lookup;
 
 // Delta encoding, combine punc codes and baby codes to give up to 81 (9x9) characters
 static bool is_baby( char c );
@@ -231,7 +232,7 @@ static void decode_lookup_tables_build()
         return;
     tables_built = true;
     const char *s = delta_encode_lookup;
-    for( int i=0; i<85; i++ )
+    for( int i=0; *s; i++ )
     {
         char c = *s++;
         delta_decode_lookup[c] = i;
@@ -280,13 +281,11 @@ static bool is_punc( char c )
 
 static bool is_delta( char c )
 {
-    if( c >= sizeof(delta_decode_lookup) )
-        return false;
     if( c == '!' )
         return true;
     decode_lookup_tables_build();       
     int val = delta_decode_lookup[c];
-    return val < (DELTA_RANGE*DELTA_RANGE);
+    return 0<val && val < (DELTA_RANGE*DELTA_RANGE);
 }
 
 // If possible, encode durations as three characters a punctuation lead in code, then two baby codes
