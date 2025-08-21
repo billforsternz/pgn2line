@@ -167,7 +167,6 @@ character instead of three ('!' to leave blitzing mode plus mm and ss baby codes
                             //  negative deltas are very useful for blitzed out moves. If two
                             //  consecutive clk values are BOTH in the golden range we can encode
                             //  both in 3 bytes.
-#define DELTA_RANGE 5
 
 // Convert number from 0-59 to alphanumeric character
 //  I'm calling this Babylonian codes, baby codes for short (especially as the idea
@@ -279,6 +278,8 @@ static bool is_punc( char c )
     return val != 0;
 }
 
+static int DELTA_RANGE=5;
+
 static bool is_delta( char c )
 {
     if( c == '!' )
@@ -364,10 +365,8 @@ static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss,
 
     // Absolute codes always follow Y codes, and otherwise we need an 'X' to lead in to
     //  the absolute minute and second baby codes
-    #if DELTA_RANGE > 5
-    else if( is_delta(baby) || baby=='X' )  // if the baby code is not unambiguous
+    else if( DELTA_RANGE>5 && (is_delta(baby) || baby=='X') )  // if the baby code is not unambiguous
         out += 'X'; // sentinel
-    #endif
     out += baby;
 
     // Encode seconds
@@ -376,14 +375,15 @@ static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss,
 }
 
 // Start time encoding is an optimisation, use a single letter at the start of the BabyClk string
-static int start_time_codes[] = {90,3,5,10,15,25,30,60,75,120};
+static int start_time_codes[] = {90,5,15,25,60};
+#define NBR_START_TIMES (sizeof(start_time_codes)/sizeof(start_time_codes[0]))
 #define START_TIME_CODE_MIN 'A'     // 'A' is minimum and also default
-#define START_TIME_CODE_MAX ('A' + sizeof(start_time_codes)/sizeof(start_time_codes[0]) - 1)
+#define START_TIME_CODE_MAX ('A' + NBR_START_TIMES - 1)
 #define START_TIME_CODE_DEFAULT 'A'
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
 //  Babylonian (base-60) clock times 
-static void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_clk_times )
+static void clk_times_encode_inner( const std::vector<int> &clk_times, std::string &encoded_clk_times )
 {
     #ifdef BABY_DEBUG
     printf("\nclk_times_encode()\n" );
@@ -419,6 +419,11 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
     int start_time_s = 60 * start_time_codes[start_time_code-START_TIME_CODE_MIN];
     int time_w = start_time_s;  // Start time for both sides
     int time_b = start_time_s;
+
+    // Now encode delta time too
+    int start_time_plus_delta_range = start_time_code-'A';
+    start_time_plus_delta_range += ((DELTA_RANGE-5) * NBR_START_TIMES);
+    start_time_code = 'A'+start_time_plus_delta_range;
     encoded_clk_times += start_time_code;
 
     // Loop taking one element (for absolute coding) or two for (delta coding) at a time
@@ -500,12 +505,31 @@ static void clk_times_encode( const std::vector<int> &clk_times, std::string &en
     // happening to unhelpfully fall into the start time range
     if( encoded_clk_times.length() < 2 )
         encoded_clk_times.clear();  // start_time_code only, omit
+#if 0
     else
     {
         bool in_range = (START_TIME_CODE_MIN<=encoded_clk_times[1] && encoded_clk_times[1]<=START_TIME_CODE_MAX);
         if( start_time_code==START_TIME_CODE_DEFAULT && !in_range )
             encoded_clk_times = encoded_clk_times.substr(1);    // omit
     }
+#endif
+}
+
+static void clk_times_encode( const std::vector<int> &clk_times, std::string &encoded_clk_times )
+{
+    int best_so_far = INT_MAX;
+    int winner = 5;
+    for( DELTA_RANGE=5; DELTA_RANGE<=9; DELTA_RANGE++ )
+    {
+        clk_times_encode_inner( clk_times, encoded_clk_times );
+        if( encoded_clk_times.length() < (size_t)best_so_far )
+        {
+            winner = DELTA_RANGE;
+            best_so_far = (int)encoded_clk_times.size();
+        }
+    }
+    DELTA_RANGE =  winner;
+    clk_times_encode_inner( clk_times, encoded_clk_times );
 }
 
 //  For now the reverse procedure is a test only
@@ -538,6 +562,19 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
         {
             case init:
             {
+#if 1
+                state = delta_w;   // next state, whether falling through or not
+                int start_time_plus_delta_range = c-'A';
+                int start_time  = start_time_plus_delta_range % NBR_START_TIMES;
+                int delta_range = start_time_plus_delta_range / NBR_START_TIMES;
+                DELTA_RANGE = delta_range+5;
+                time_w = time_b = 60 * start_time_codes[start_time];
+                hh_w = hh_b = time_w/3600;
+                mm_w = mm_b = (time_w - hh_w*3600) / 60;
+                ss_w = ss_b = time_w%60;
+                break;
+#else
+
                 // Set up our time state variables, even if the first code isn't
                 //  a starting time code
                 state = delta_w;   // next state, whether falling through or not
@@ -552,6 +589,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
 
                 // Fall through if it wasn't a time code;
                 if( is_time_code ) break;
+#endif
             }
 
             // Normal start point, expect start of a delta coded triplet by default
@@ -573,13 +611,11 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     // Path 1 to absolute encoding
                     state = (white?hour_w:hour_b);
                 }
-                #if DELTA_RANGE > 5
-                else if( c == 'X' )
+                else if( DELTA_RANGE>5 && c=='X' )
                 {
                     // Path 2 to absolute encoding
                     state = (white?minute_w:minute_b);
                 }
-                #endif
                 else if( is_delta(c) )
                 {
                     punc_code = c;
