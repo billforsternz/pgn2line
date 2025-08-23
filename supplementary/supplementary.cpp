@@ -120,7 +120,7 @@ static COMMAND table[] =
 
 int main( int argc, const char **argv )
 {
-#if 1 // def _DEBUG
+#if 0 // def _DEBUG
     const char *args[] =
     {
         /*"dont-care.exe",
@@ -138,7 +138,7 @@ int main( int argc, const char **argv )
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out.lpgn",
         "c:/users/bill/documents/chess/nzl/2025/fir-report.txt"
         #endif
-        #if 1
+        #if 0
         "dont-care.exe",
         "rac",
         "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/lichess-broadcasts-2025-nz.lpgn",
@@ -162,6 +162,13 @@ int main( int argc, const char **argv )
         "c:/users/bill/documents/chess/nzl/2025/manual-fide-id-custom.txt",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out.lpgn",
         "c:/users/bill/documents/chess/nzl/2025/nzl2024-out2.lpgn"
+        #endif
+        #if 1
+        "dont-care.exe",
+        "zz",
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/nz-fide-id-from-nzcf-vega.txt",
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/lichess-broadcasts-2025-improved.lpgn",
+        "c:/users/bill/documents/chess/nzl/2025/lichess-broadcasts/lichess-broadcasts-2025-improved-nz.lpgn"
         #endif
     };
     argc = sizeof(args)/sizeof(args[0]);

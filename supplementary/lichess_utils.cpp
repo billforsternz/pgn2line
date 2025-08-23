@@ -161,6 +161,9 @@ character instead of three ('!' to leave blitzing mode plus mm and ss baby codes
 
 */
 
+static int delta_range_count;
+static int start_times_count;
+
 // Some BabyClk options
 //#define BABY_DEBUG
 #define DURATION_OFFSET 30  // defines our 5 minute delta duration window as [-30,4:30) the short
@@ -212,6 +215,7 @@ static int baby_decode( char baby )
 //  both players durations when they both fit in the same 5 minute window
 // static const char *punc_encode_lookup  = "!#$%&()*+,-.:;<=>?^_`{|}~";
 static const char *delta_encode_lookup = "!#$%&()*+,-.:;<=>?^_`{|}~WVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkjihgfedcba9876543";
+//static const char *delta_encode_lookup   = "!#$%&()*+,-.:;<=>?^_`{|}~3456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW";
 static const char *punc_encode_lookup  = delta_encode_lookup;
 
 // Delta encoding, combine punc codes and baby codes to give up to 81 (9x9) characters
@@ -361,7 +365,10 @@ static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss,
 
     // Encode hour changes, this is an exception, it doesn't happen often
     if( hh != (time/3600) )
-        out += util::sprintf("Y%c", '0'+hh );
+    {
+        for( int i=0; i<hh+1; i++ )
+            out += 'Y';
+    }
 
     // Absolute codes always follow Y codes, and otherwise we need an 'X' to lead in to
     //  the absolute minute and second baby codes
@@ -375,11 +382,10 @@ static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss,
 }
 
 // Start time encoding is an optimisation, use a single letter at the start of the BabyClk string
-static int start_time_codes[] = {90,5,15,25,60};
-#define NBR_START_TIMES (sizeof(start_time_codes)/sizeof(start_time_codes[0]))
-#define START_TIME_CODE_MIN 'A'     // 'A' is minimum and also default
-#define START_TIME_CODE_MAX ('A' + NBR_START_TIMES - 1)
-#define START_TIME_CODE_DEFAULT 'A'
+static int start_times[] = {90,3,5,10,15,25,60,75};
+#define NBR_START_TIMES (sizeof(start_times)/sizeof(start_times[0]))
+static int start_time_counts[NBR_START_TIMES];
+static int delta_range_counts[5];
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
 //  Babylonian (base-60) clock times 
@@ -392,41 +398,49 @@ static void clk_times_encode_inner( const std::vector<int> &clk_times, std::stri
     bool blitzing_mode=false;
 
     // Set a good, hopefully excellent nominal start time, using the first time from our array
-    char start_time_code = START_TIME_CODE_DEFAULT; // fall back to this
+    int start_time_idx = 0;  // fall back to this
     int best_so_far = INT_MAX;
-    int len = (int) clk_times.size();
-    int clk_time = (len>0 ? clk_times[0] : -1);
+    int clk_time = -1;
+    for( int val: clk_times )
+    {
+        if( val != -1 )
+        {
+            clk_time = val;
+            break;
+        }
+    }
     if( clk_time != -1 )    // if not absent or filler
     {
         int s = ((clk_time>>16) & 0xff) * 3600 +
                 ((clk_time>>8) & 0xff) * 60 +
                 ( clk_time & 0xff);
-        for( int i=0; i<sizeof(start_time_codes)/sizeof(start_time_codes[0]); i++ )
+        for( int i=0; i<NBR_START_TIMES; i++ )
         {
-            int trial_s = 60 * start_time_codes[i];
+            int trial_s = 60 * start_times[i];
             int diff = trial_s - s;
             if( diff < 0 )
                 diff = 0-diff;
             if( diff < best_so_far )
             {
                 best_so_far = diff;
-                start_time_code = START_TIME_CODE_MIN+i;
+                start_time_idx = i;
             }
         }
     }
 
     // Set the initial time, for encoding and decoding
-    int start_time_s = 60 * start_time_codes[start_time_code-START_TIME_CODE_MIN];
+    int start_time_s = 60 * start_times[start_time_idx];
     int time_w = start_time_s;  // Start time for both sides
     int time_b = start_time_s;
 
     // Now encode delta time too
-    int start_time_plus_delta_range = start_time_code-'A';
-    start_time_plus_delta_range += ((DELTA_RANGE-5) * NBR_START_TIMES);
-    start_time_code = 'A'+start_time_plus_delta_range;
-    encoded_clk_times += start_time_code;
+    int  delta_idx = DELTA_RANGE-5;
+    int  start_time_plus_delta_idx  = start_time_idx + (delta_idx * NBR_START_TIMES);
+    char start_time_plus_delta_code = baby_encode(start_time_plus_delta_idx);
+    encoded_clk_times += start_time_plus_delta_code;
 
     // Loop taking one element (for absolute coding) or two for (delta coding) at a time
+    int len = (int) clk_times.size();
     for( int i=0; i<len; i++ )
     {
         bool more    = i+1<len;
@@ -500,12 +514,16 @@ static void clk_times_encode_inner( const std::vector<int> &clk_times, std::stri
         }
     }
 
+    // If start time and delta range index only, no need to keep it
+    if( encoded_clk_times.length() == 1 )
+        encoded_clk_times.clear();
+
     // A little optimisation, if we use default start time, we omit it unless
     // such omission would result in the first character of the BabyClk string
     // happening to unhelpfully fall into the start time range
+#if 0
     if( encoded_clk_times.length() < 2 )
         encoded_clk_times.clear();  // start_time_code only, omit
-#if 0
     else
     {
         bool in_range = (START_TIME_CODE_MIN<=encoded_clk_times[1] && encoded_clk_times[1]<=START_TIME_CODE_MAX);
@@ -539,6 +557,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
     bool fall_through_half_duration_at_end = false;
     char punc_code, baby_w, baby_b;
     bool white_save;
+    int  nbr_ys_in_a_row;
 
     // Keep time in seconds, and its hh,mm,ss components in sync as state variables
     int time_w=0, time_b=0;
@@ -562,34 +581,19 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
         {
             case init:
             {
-#if 1
-                state = delta_w;   // next state, whether falling through or not
-                int start_time_plus_delta_range = c-'A';
-                int start_time  = start_time_plus_delta_range % NBR_START_TIMES;
-                int delta_range = start_time_plus_delta_range / NBR_START_TIMES;
-                DELTA_RANGE = delta_range+5;
-                time_w = time_b = 60 * start_time_codes[start_time];
+                state = delta_w;
+                char start_time_plus_delta_code = c;
+                int start_time_plus_delta_idx = baby_decode(c);
+                int start_time_idx  = start_time_plus_delta_idx % NBR_START_TIMES;
+                int delta_range_idx = start_time_plus_delta_idx / NBR_START_TIMES;
+                start_time_counts[start_time_idx]++;
+                delta_range_counts[delta_range_idx]++;
+                DELTA_RANGE = 5+delta_range_idx;
+                time_w = time_b = 60 * start_times[start_time_idx];
                 hh_w = hh_b = time_w/3600;
                 mm_w = mm_b = (time_w - hh_w*3600) / 60;
                 ss_w = ss_b = time_w%60;
                 break;
-#else
-
-                // Set up our time state variables, even if the first code isn't
-                //  a starting time code
-                state = delta_w;   // next state, whether falling through or not
-                bool is_time_code = (START_TIME_CODE_MIN<=c && c<=START_TIME_CODE_MAX);
-                char start_time_code = START_TIME_CODE_DEFAULT;
-                if( is_time_code )
-                    start_time_code = c;
-                time_w = time_b = 60 * start_time_codes[start_time_code-START_TIME_CODE_MIN];
-                hh_w = hh_b = time_w/3600;
-                mm_w = mm_b = (time_w - hh_w*3600) / 60;
-                ss_w = ss_b = time_w%60;
-
-                // Fall through if it wasn't a time code;
-                if( is_time_code ) break;
-#endif
             }
 
             // Normal start point, expect start of a delta coded triplet by default
@@ -610,6 +614,7 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 {
                     // Path 1 to absolute encoding
                     state = (white?hour_w:hour_b);
+                    nbr_ys_in_a_row = 1;
                 }
                 else if( DELTA_RANGE>5 && c=='X' )
                 {
@@ -635,6 +640,27 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                     state = (white?second_w:second_b);
                 }
                 break;
+            }
+
+            // Y code character changes the hour
+            case hour_w:
+            case hour_b:
+            {
+                bool white = (state==hour_w);
+                bool fall_through = (c!='Y');   // fall through after run of 'Y' codes
+                if( c == 'Y' )
+                    nbr_ys_in_a_row++;
+                else
+                {
+                    int &hh = white ? hh_w : hh_b;
+                    hh = nbr_ys_in_a_row-1;
+                    #ifdef BABY_DEBUG
+                    printf( " hour_%c %d ", white?'w':'b', hh );
+                    #endif
+                    state = white?minute_w:minute_b;
+                    // fall through to minute_w and minute_b
+                }
+                if( !fall_through ) break;
             }
 
             // Absolute encoding
@@ -669,10 +695,11 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 else if( c == 'Y' )
                 {
                     state = (white_save ? hour_w : hour_b);
+                    nbr_ys_in_a_row = 1;
                 }
 
                 // '!' exits blitzing (protocol trick, '!' is not needed as a duration
-                //   code during blitzing, so use it for blitzing -> absolute transition)
+                //   code during blitzing, so use it to exit blitzing
                 else if( c == '!' )
                 {
                     state = white_save ? delta_w : delta_b;   // just exit blitzing
@@ -773,20 +800,6 @@ static void clk_times_decode( const std::string &encoded_clk_times, std::vector<
                 time = hh*3600 + mm*60 + ss;
                 break;
             }
-            
-            // Y code character changes the hour
-            case hour_w:
-            case hour_b:
-            {
-                bool white = (state==hour_w);
-                int &hh = white ? hh_w : hh_b;
-                hh = c-'0';
-                #ifdef BABY_DEBUG
-                printf( " hour_%c %d ", white?'w':'b', hh );
-                #endif
-                state = white?minute_w:minute_b;
-                break;
-            }
         }
     }
 }
@@ -814,6 +827,20 @@ std::string lichess_moves_to_normal_pgn_extra_stats()
         (1.0*baby_total_length) / (1.0*(baby_nbr_tests_passed?baby_nbr_tests_passed:1)),
         baby_nbr_tests_failed,
         baby_nbr_tests_aborted );
+    s += "Delta range popularity: ";
+    for( int i=0; i<5; i++ )
+    {
+        s += util::sprintf("%s%d:%d%s", i==0?"[":",",
+                i+5, delta_range_counts[i],
+                i==5-1?"]\n":"");
+    }
+    s += "Start time popularity: ";
+    for( int i=0; i<NBR_START_TIMES; i++ )
+    {
+        s += util::sprintf("%s%d:%d%s", i==0?"[":",",
+                start_times[i], start_time_counts[i],
+                i==NBR_START_TIMES-1?"]\n":"");
+    }
     return s;
 }
 

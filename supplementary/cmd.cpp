@@ -1300,12 +1300,63 @@ struct GAME2
                     {
                         std::string val;
                         bool we_have_updated_date = key_find_subkey( header, "AlgoUpdates", "Date", val );
-                        if( we_have_updated_date )
+                        if( we_have_updated_date && val=="UTCDate" )
                         {
-                            printf( "@@@ %s\n", val.c_str() );
-                            // TODO improve the Date to NZ time approx
-                            if( val == "UTCDate" )
-                                key_update_subkey( header, "AlgoUpdates", "Date", "NZGame" );
+                            std::string date, utc_date, utc_time;
+                            key_find(header,"Date", date );
+                            key_find(header,"UTCDate", utc_date );
+                            key_find(header,"UTCTime", utc_time );
+                            if( date==utc_date  && date.length()==10  && utc_time.length()>2 )
+                            {
+
+                                // Check for a UTC evening time, in NZ that will be the
+                                //  morning of the next day!
+                                char hh1 = utc_time[0];
+                                char hh2 = utc_time[0];
+                                if( '0'<=hh1 && hh1<='9' && '0'<=hh2 && hh2<='9' )
+                                {
+                                    int hour = (hh1-'0')*10 + (hh2-'0');
+                                    if( hour > 11 )
+                                    {
+
+                                        // Increment the date
+                                        std::string syyyy = date.substr(0,4);  
+                                        std::string smm = date.substr(5,2);  
+                                        std::string sdd = date.substr(8,2);
+                                        int yyyy = atoi(syyyy.c_str());
+                                        int mm   = atoi(smm.c_str());
+                                        int dd   = atoi(sdd.c_str());
+                                        if( yyyy>2000 && 1<=mm && mm<=12 && 1<=dd && dd<=31 )
+                                        {
+                                            // "30 days have September, April, June and November..."
+                                            bool sep_apr_jun_nov = (mm==9 || mm==4 || mm==6 || mm==11);
+                                            dd++;
+                                            if( dd > 31 )
+                                            {
+                                                dd = 1;
+                                                mm++;
+                                                if( mm == 13 )
+                                                {
+                                                    mm = 1;
+                                                    yyyy++;
+                                                }
+                                            }
+                                            else if( sep_apr_jun_nov && dd>30 )
+                                            {
+                                                dd = 1;
+                                                mm++;
+                                            }
+                                            else if( mm==2 && dd > (yyyy%4==0 ? 29 : 28) )  // Leap year correction good until 2100 which isn't a leap year
+                                            {
+                                                dd = 1;
+                                                mm++;
+                                            }
+                                            key_replace(header,"Date",util::sprintf("%04d.%02d.%02d",yyyy,mm,dd) );
+                                            key_update_subkey( header, "AlgoUpdates", "Date", "NZCorrectedDate" );
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     util::putline(out,header+moves);
@@ -1349,8 +1400,26 @@ int cmd_lichess_broadcast_improve( std::ifstream &in, std::ofstream &out )
         bool ok2 = key_find( header, "BroadcastName", name );
         if( ok && ok2 && (util::prefix(event,"Round ") || util::prefix(event,"Game ")) )
         {
+            std::string old_event, round;
+            old_event = event;
             key_replace(header,"Event",name);
             key_update_subkey(header,"AlgoUpdates","Event","Broadcast");
+            if( util::prefix(old_event,"Round ") && !key_find(header,"Round",round) )
+            {
+                if( old_event.length()>6 )
+                {
+                    size_t offset = old_event.find_first_not_of("0123456789.",6);
+                    if( offset != 6 )
+                    {
+                        if( offset != std::string::npos )
+                            round = old_event.substr(6, offset-6 );
+                        else
+                            round = old_event.substr(6);
+                        key_update(header,"Round","Date",round);
+                        key_update_subkey(header,"AlgoUpdates","Round","FromEvent");
+                    }
+                }
+            }
         }
         std::string date;
         std::string utc_date;
