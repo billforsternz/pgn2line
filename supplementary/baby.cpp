@@ -1,7 +1,6 @@
 //  baby.cpp, Convert clock times to a string suitable for a PGN tag
 
 #include "..\util.h"
-#include "..\thc.h"
 #include "baby.h"
 
 /*
@@ -159,250 +158,55 @@ character instead of three ('!' to leave blitzing mode plus mm and ss baby codes
 
 */
 
-static int delta_range_count;
-static int start_times_count;
-
 // Some BabyClk options
 //#define BABY_DEBUG
+static int DELTA_RANGE=5;
 #define DURATION_OFFSET 30  // defines our 5 minute delta duration window as [-30,4:30) the short
                             //  negative deltas are very useful for blitzed out moves. If two
                             //  consecutive clk values are BOTH in the golden range we can encode
                             //  both in 3 bytes.
 
-// Convert number from 0-59 to alphanumeric character
-//  I'm calling this Babylonian codes, baby codes for short (especially as the idea
-//  is to make short strings:)
-static char baby_encode( int val )
-{
-
-    // Input must already be constrained into 0-59 range
-    char baby;
-    if( val < 10 )
-        baby = '0'+val;          // 0-9 => '0'-'9'
-    else if( val < 36 )
-        baby = 'a'+(val-10);     // 10-35 => 'a'-'z'
-    else
-        baby = 'A'+(val-36);     // 36-59 => 'A'-'X'
-    return baby;
-}
-
-// Decode baby codes
-static int baby_decode( char baby )
-{
-
-    // Input must already be constrained into alphanumeric range
-    int val;
-    if( '0'<=baby && baby<='9' )
-        val = baby-'0';         // '0'-'9' => 0-9
-    else if( 'a'<=baby && baby<='z' )
-        val = baby-'a'+10;      // 'a'-'z' => 10-35
-    else
-        val = baby-'A'+36;      // 'A'-'X' => 36-59
-    return val;
-}
-
-// ASCII printables complete -> !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
-//
-// 25 inoffensive punctuation codes in a PGN context -> !#$%&()*+,-.:;<=>?@^_{|}~
-//  Avoids annoying symbols like each of -> "\/'`[]  (actually now @ out ` in to avoid @h, @M problems)
-//  Of course '[' and ']' are only annoying in a PGN context
-//  We did have a more complicated 31 character scheme but the 25 character scheme is
-//  simpler, and more future proof
-
-// Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios, all combinations of
-//  both players durations when they both fit in the same 5 minute window
-// static const char *punc_encode_lookup  = "!#$%&()*+,-.:;<=>?^_`{|}~";
-static const char *delta_encode_lookup = "!#$%&()*+,-.:;<=>?^_`{|}~WVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkjihgfedcba9876543";
-//static const char *delta_encode_lookup   = "!#$%&()*+,-.:;<=>?^_`{|}~3456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW";
-static const char *punc_encode_lookup  = delta_encode_lookup;
-
-// Delta encoding, combine punc codes and baby codes to give up to 81 (9x9) characters
-static bool is_baby( char c );
-static bool is_punc( char c );
-static bool is_delta( char c );
-static char delta_encode( int val );
-static int  delta_decode( char delta );
-static char punc_encode( int val );
-static int  punc_decode( char punc );
-static int  punc_decode_lookup[128];
-static int  delta_decode_lookup[128];
-static void decode_lookup_tables_build()
-{
-    static bool tables_built;
-    if( tables_built )
-        return;
-    tables_built = true;
-    const char *s = delta_encode_lookup;
-    for( int i=0; *s; i++ )
-    {
-        char c = *s++;
-        delta_decode_lookup[c] = i;
-        if( i < 25 )
-            punc_decode_lookup[c] = i;
-    }
-}
-
-static char delta_encode( int val )
-{
-    return delta_encode_lookup[val];
-}
-
-static int delta_decode( char delta )
-{
-    decode_lookup_tables_build();       
-    int val = delta_decode_lookup[delta];
-    return val;
-}
-
-static char punc_encode( int val )
-{
-    return punc_encode_lookup[val];
-}
-
-static int punc_decode( char punc )
-{
-    decode_lookup_tables_build();       
-    int val = punc_decode_lookup[punc];
-    return val;
-}
-
-static bool is_baby( char c )
-{
-    return ('0'<=c && c<='9') || ('a'<=c && c<='z') || ('A'<=c && c<='X');
-}
-
-static bool is_punc( char c )
-{
-    if( c == '!' )
-        return true;
-    decode_lookup_tables_build();       
-    int val = punc_decode_lookup[c];
-    return val != 0;
-}
-
-static int DELTA_RANGE=5;
-
-static bool is_delta( char c )
-{
-    if( c == '!' )
-        return true;
-    decode_lookup_tables_build();       
-    int val = delta_decode_lookup[c];
-    return 0<val && val < (DELTA_RANGE*DELTA_RANGE);
-}
-
-// If possible, encode durations as three characters a punctuation lead in code, then two baby codes
-static bool duration_encode( int duration_w, int duration_b, char &delta_code, char &baby_w, char &baby_b )
-{
-    duration_w += DURATION_OFFSET;
-    duration_b += DURATION_OFFSET;
-    bool ok = (0<=duration_w && duration_w<DELTA_RANGE*60 && 0<=duration_b && duration_b<DELTA_RANGE*60);
-    if( ok )
-    {
-        int min_w = duration_w/60;
-        int sec_w = duration_w%60;
-        int min_b = duration_b/60;
-        int sec_b = duration_b%60;
-        int idx  = DELTA_RANGE*min_w + min_b; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 24
-        delta_code = delta_encode(idx);
-        baby_w = baby_encode(sec_w);
-        baby_b = baby_encode(sec_b);
-        // if( delta_code == '!' && baby_w=='g' && baby_b=='z' )
-        //     printf( "Debug\n" );
-    }
-    return ok;
-}
-
-// Decode duration coding
-static bool duration_decode( char delta_code, char baby_w, char baby_b, int &duration_w, int &duration_b )
-{
-    if( !is_delta(delta_code) )
-        return false;
-    int idx = delta_decode(delta_code);
-    int seconds_w = baby_decode(baby_w);
-    int seconds_b = baby_decode(baby_b);
-    int min_w = idx/DELTA_RANGE;
-    int min_b = idx%DELTA_RANGE;
-    duration_w = min_w*60 + seconds_w;
-    duration_b = min_b*60 + seconds_b;
-    duration_w -= DURATION_OFFSET;
-    duration_b -= DURATION_OFFSET;
-    return true;
-}
-
-// Split hhmmss into components and calculate duration
-static bool clk_times_calc_duration( int time, int hhmmss, int &hh, int &mm, int &ss, int &duration )
-{
-    if( hhmmss == -1 )  // filler ?
-        return true;
-    hh = (hhmmss>>16) & 0xff;
-    mm = (hhmmss>>8) & 0xff;
-    ss = hhmmss & 0xff;
-    if( hh>9 )  hh = 9;
-    if( mm>59 ) mm = 59;
-    if( ss>59 ) ss = 59;
-
-    // Calculate duration, positive values represent declining time
-    int t2 = hh*3600 + mm*60 + ss;
-    duration = time-t2;
-    return false;
-}
-
-// Encode absolute time hhmmss
-static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss, std::string &out )
-{
-    out.clear();
-    if( filler )
-    {
-        out = "Z";   // filler, sometimes no clk time is recorded for a move, just move on
-        return;
-    }
-
-    // Encode minutes
-    char baby = baby_encode(mm);
-
-    // Encode hour changes, this is an exception, it doesn't happen often
-    if( hh != (time/3600) )
-    {
-        for( int i=0; i<hh+1; i++ )
-            out += 'Y';
-    }
-
-    // Absolute codes always follow Y codes, and otherwise we need an 'X' to lead in to
-    //  the absolute minute and second baby codes
-    else if( DELTA_RANGE>5 && (is_delta(baby) || baby=='X') )  // if the baby code is not unambiguous
-        out += 'X'; // sentinel
-    out += baby;
-
-    // Encode seconds
-    baby = baby_encode(ss);
-    out += baby;
-}
-
-// Start time encoding is an optimisation, use a single letter at the start of the BabyClk string
+// Local data
 static int start_times[] = {90,3,5,10,15,25,60,75};
 #define NBR_START_TIMES (sizeof(start_times)/sizeof(start_times[0]))
 static int start_time_counts[NBR_START_TIMES];
 static int delta_range_counts[5];
+static int delta_range_count;
+static int start_times_count;
 
-std::string baby_stats_extra()
-{
-    std::string s = "Delta range popularity: ";
-    for( int i=0; i<5; i++ )
-    {
-        s += util::sprintf("%s%d:%d%s", i==0?"[":",",
-                i+5, delta_range_counts[i],
-                i==5-1?"]\n":"");
-    }
-    s += "Start time popularity: ";
-    for( int i=0; i<NBR_START_TIMES; i++ )
-    {
-        s += util::sprintf("%s%d:%d%s", i==0?"[":",",
-                start_times[i], start_time_counts[i],
-                i==NBR_START_TIMES-1?"]\n":"");
-    }
-    return s;
- }
+// Encode the clock times with one set of configurable options
+static void clk_times_encode_inner( const std::vector<int> &clk_times, std::string &encoded_clk_times );
+
+// Convert number from 0-59 to alphanumeric character
+//  I'm calling this Babylonian codes, baby codes for short (especially as the idea
+//  is to make short strings:)
+static char baby_encode( int val );
+static int baby_decode( char baby );
+static bool is_baby( char c );
+
+// Convert number from 0-24 to punctuation character
+static char punc_encode( int val );
+static int  punc_decode( char punc );
+static bool is_punc( char c );
+
+// Delta encoding, combine punc codes and baby codes to give up to 81 (9x9) characters
+static char delta_encode( int val );
+static int  delta_decode( char delta );
+static bool is_delta( char c );
+static void decode_lookup_tables_build();
+
+// If possible, encode durations as three characters a punctuation lead in code, then two baby codes
+static bool duration_encode( int duration_w, int duration_b, char &delta_code, char &baby_w, char &baby_b );
+
+// Decode duration coding
+static bool duration_decode( char delta_code, char baby_w, char baby_b, int &duration_w, int &duration_b );
+
+// Split hhmmss into components and calculate duration
+static bool clk_times_calc_duration( int time, int hhmmss, int &hh, int &mm, int &ss, int &duration );
+
+// Encode absolute time hhmmss
+static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss, std::string &out );
+
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
 //  Babylonian (base-60) clock times 
@@ -548,6 +352,119 @@ static void clk_times_encode_inner( const std::vector<int> &clk_times, std::stri
             encoded_clk_times = encoded_clk_times.substr(1);    // omit
     }
 #endif
+}
+
+// Convert number from 0-59 to alphanumeric character
+//  I'm calling this Babylonian codes, baby codes for short (especially as the idea
+//  is to make short strings:)
+static char baby_encode( int val )
+{
+
+    // Input must already be constrained into 0-59 range
+    char baby;
+    if( val < 10 )
+        baby = '0'+val;          // 0-9 => '0'-'9'
+    else if( val < 36 )
+        baby = 'a'+(val-10);     // 10-35 => 'a'-'z'
+    else
+        baby = 'A'+(val-36);     // 36-59 => 'A'-'X'
+    return baby;
+}
+
+// Decode baby codes
+static int baby_decode( char baby )
+{
+
+    // Input must already be constrained into alphanumeric range
+    int val;
+    if( '0'<=baby && baby<='9' )
+        val = baby-'0';         // '0'-'9' => 0-9
+    else if( 'a'<=baby && baby<='z' )
+        val = baby-'a'+10;      // 'a'-'z' => 10-35
+    else
+        val = baby-'A'+36;      // 'A'-'X' => 36-59
+    return val;
+}
+
+// ASCII printables complete -> !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
+//
+// 25 inoffensive punctuation codes in a PGN context -> !#$%&()*+,-.:;<=>?@^_{|}~
+//  Avoids annoying symbols like each of -> "\/'`[]  (actually now @ out ` in to avoid @h, @M problems)
+//  Of course '[' and ']' are only annoying in a PGN context
+//  We did have a more complicated 31 character scheme but the 25 character scheme is
+//  simpler, and more future proof
+
+// Simplified, 25 duration codes, allows us to specify 5x5 = 25 scenarios, all combinations of
+//  both players durations when they both fit in the same 5 minute window
+// static const char *punc_encode_lookup  = "!#$%&()*+,-.:;<=>?^_`{|}~";
+static const char *delta_encode_lookup = "!#$%&()*+,-.:;<=>?^_`{|}~WVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkjihgfedcba9876543";
+//static const char *delta_encode_lookup   = "!#$%&()*+,-.:;<=>?^_`{|}~3456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW";
+static const char *punc_encode_lookup  = delta_encode_lookup;
+
+// Build lookup tables
+static int  punc_decode_lookup[128];
+static int  delta_decode_lookup[128];
+static void decode_lookup_tables_build()
+{
+    static bool tables_built;
+    if( tables_built )
+        return;
+    tables_built = true;
+    const char *s = delta_encode_lookup;
+    for( int i=0; *s; i++ )
+    {
+        char c = *s++;
+        delta_decode_lookup[c] = i;
+        if( i < 25 )
+            punc_decode_lookup[c] = i;
+    }
+}
+
+static char delta_encode( int val )
+{
+    return delta_encode_lookup[val];
+}
+
+static int delta_decode( char delta )
+{
+    decode_lookup_tables_build();       
+    int val = delta_decode_lookup[delta];
+    return val;
+}
+
+static char punc_encode( int val )
+{
+    return punc_encode_lookup[val];
+}
+
+static int punc_decode( char punc )
+{
+    decode_lookup_tables_build();       
+    int val = punc_decode_lookup[punc];
+    return val;
+}
+
+static bool is_baby( char c )
+{
+    return ('0'<=c && c<='9') || ('a'<=c && c<='z') || ('A'<=c && c<='X');
+}
+
+static bool is_punc( char c )
+{
+    if( c == '!' )
+        return true;
+    decode_lookup_tables_build();       
+    int val = punc_decode_lookup[c];
+    return val != 0;
+}
+
+static bool is_delta( char c )
+{
+    if( c == '!' )
+        return true;
+    decode_lookup_tables_build();       
+    int val = delta_decode_lookup[c];
+    return 0<val && val < (DELTA_RANGE*DELTA_RANGE);
 }
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
@@ -822,4 +739,113 @@ void baby_clk_decode( const std::string &encoded_clk_times, std::vector<int> &cl
         }
     }
 }
+
+// If possible, encode durations as three characters a punctuation lead in code, then two baby codes
+static bool duration_encode( int duration_w, int duration_b, char &delta_code, char &baby_w, char &baby_b )
+{
+    duration_w += DURATION_OFFSET;
+    duration_b += DURATION_OFFSET;
+    bool ok = (0<=duration_w && duration_w<DELTA_RANGE*60 && 0<=duration_b && duration_b<DELTA_RANGE*60);
+    if( ok )
+    {
+        int min_w = duration_w/60;
+        int sec_w = duration_w%60;
+        int min_b = duration_b/60;
+        int sec_b = duration_b%60;
+        int idx  = DELTA_RANGE*min_w + min_b; // 0;0 => 0, 0;1 => 1 .... 1;0 => 5 .... 4;4 => 24
+        delta_code = delta_encode(idx);
+        baby_w = baby_encode(sec_w);
+        baby_b = baby_encode(sec_b);
+        // if( delta_code == '!' && baby_w=='g' && baby_b=='z' )
+        //     printf( "Debug\n" );
+    }
+    return ok;
+}
+
+// Decode duration coding
+static bool duration_decode( char delta_code, char baby_w, char baby_b, int &duration_w, int &duration_b )
+{
+    if( !is_delta(delta_code) )
+        return false;
+    int idx = delta_decode(delta_code);
+    int seconds_w = baby_decode(baby_w);
+    int seconds_b = baby_decode(baby_b);
+    int min_w = idx/DELTA_RANGE;
+    int min_b = idx%DELTA_RANGE;
+    duration_w = min_w*60 + seconds_w;
+    duration_b = min_b*60 + seconds_b;
+    duration_w -= DURATION_OFFSET;
+    duration_b -= DURATION_OFFSET;
+    return true;
+}
+
+// Split hhmmss into components and calculate duration
+static bool clk_times_calc_duration( int time, int hhmmss, int &hh, int &mm, int &ss, int &duration )
+{
+    if( hhmmss == -1 )  // filler ?
+        return true;
+    hh = (hhmmss>>16) & 0xff;
+    mm = (hhmmss>>8) & 0xff;
+    ss = hhmmss & 0xff;
+    if( hh>9 )  hh = 9;
+    if( mm>59 ) mm = 59;
+    if( ss>59 ) ss = 59;
+
+    // Calculate duration, positive values represent declining time
+    int t2 = hh*3600 + mm*60 + ss;
+    duration = time-t2;
+    return false;
+}
+
+// Encode absolute time hhmmss
+static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss, std::string &out )
+{
+    out.clear();
+    if( filler )
+    {
+        out = "Z";   // filler, sometimes no clk time is recorded for a move, just move on
+        return;
+    }
+
+    // Encode minutes
+    char baby = baby_encode(mm);
+
+    // Encode hour changes, this is an exception, it doesn't happen often
+    if( hh != (time/3600) )
+    {
+        for( int i=0; i<hh+1; i++ )
+            out += 'Y';
+    }
+
+    // Absolute codes always follow Y codes, and otherwise we need an 'X' to lead in to
+    //  the absolute minute and second baby codes
+    else if( DELTA_RANGE>5 && (is_delta(baby) || baby=='X') )  // if the baby code is not unambiguous
+        out += 'X'; // sentinel
+    out += baby;
+
+    // Encode seconds
+    baby = baby_encode(ss);
+    out += baby;
+}
+
+//  Generate extra stats output for diagnostics
+std::string baby_stats_extra()
+{
+    std::string s = "Delta range popularity: ";
+    for( int i=0; i<5; i++ )
+    {
+        s += util::sprintf("%s%d:%d%s", i==0?"[":",",
+                i+5, delta_range_counts[i],
+                i==5-1?"]\n":"");
+    }
+    s += "Start time popularity: ";
+    for( int i=0; i<NBR_START_TIMES; i++ )
+    {
+        s += util::sprintf("%s%d:%d%s", i==0?"[":",",
+                start_times[i], start_time_counts[i],
+                i==NBR_START_TIMES-1?"]\n":"");
+    }
+    return s;
+ }
+
 
