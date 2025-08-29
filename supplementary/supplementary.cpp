@@ -174,8 +174,6 @@ int main( int argc, const char **argv )
     argc = sizeof(args)/sizeof(args[0]);
     argv = args;
 #endif
-    extern void test_options();
-    test_options();
     CMD_ENUM purpose;
     bool ok = (argc>=2);
     if( ok )

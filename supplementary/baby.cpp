@@ -218,6 +218,11 @@ static bool clk_times_calc_duration( int time, int hhmmss, int &hh, int &mm, int
 // Encode absolute time hhmmss
 static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss, std::string &out, int delta_range );
 
+// Combine x [0-6), y [0-5), z[0-2) into a single value [0-60)
+//  and baby code it
+static char options_combine( int x, int y, int z );
+static void options_split( char baby, int &x, int &y, int &z );
+
 //
 //  Exported functions
 //
@@ -861,55 +866,58 @@ static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss,
     out += baby;
 }
 
-#if 0
-char options_combine( int x6, int y5, int z2 )
+// Combine x [0-6), y [0-5), z[0-2) into a single value [0-60)
+//  and baby code it
+static char options_combine( int x, int y, int z )
 {
-    // example 1 [max]) x6=5, y5=4, z2=1
-    // example 2 [min]) x6=0, y5=0, z2=0
-    // example 3 [typ]) x6=3, y5=2, z2=1
-    int val = ((x6+1) * (y5+1) * (z2+1)) - 1; // ex1) 59 , ex2) 0, ex3) 23
+    int xy = x + y*6;
+    int xyz = xy + z*30;
+    int val = xyz;
     char baby = baby_encode(val);
     return baby;
 }
 
-void options_decode( char baby, int &x6, int &y5, int &z2 )
-{                                   // ex1  ex2  ex3   
-    int xyz = baby_decode(baby);    //  59    0   23
-    int z   = xyz % 2;              //   1    0    1
-    int xy  = xyz / 2;              //  29    0   11
-    int y   = xy % 5;               //   4    0    1
-    int x   = xy / 5;               //   5    0    2
-}
-#endif
+/*     y  0  1  2  3  4 
+   x
+   0      0  6  12 18 24
+   1      1  7  13 19 25
+   2      2  8  14 20 26
+   3      3  9  15 21 27
+   4      4  10 16 22 28
+   5      5  11 17 23 29
+   
+       z   0   1 
+   xy
+    0      0   30
+    1      1   31
+    2      2   32
+    .            
+    .
+   28     28   58
+   29     29   59
 
-char options_combine( int x, int y, int z )
+*/
+static void options_split( char baby, int &x, int &y, int &z )
 {
-    int val = ((y*6 + x%5) + 1) * (z+1);
-    char baby = baby_encode(val-1);
-    return baby;
+    int xyz = baby_decode(baby);
+    z       = xyz/30;
+    int xy  = xyz%30;
+    x       = xy % 6; 
+    y       = xy / 6; 
 }
 
-void options_decode( char baby, int &x, int &y, int &z )
-{
-    int xyz = baby_decode(baby)+1;
-    z   = (xyz - 1)%2;
-    int xy  = (xyz - 1)/2;
-    y   = xy % 6; 
-    x   = xy / 5; 
-}
-
-
+/*
 void test_options()
 {
     for( int x=0; x<6; x++ )
     {
-        for( int y=0; y<6; y++ )
+        for( int y=0; y<5; y++ )
         {
             for( int z=0; z<2; z++ )
             {
                 char code = options_combine(x,y,z);
                 int X,Y,Z;
-                options_decode(code,X,Y,Z);
+                options_split(code,X,Y,Z);
                 bool ok = (x==X && y==Y && z==Z);
                 if( !ok )
                 {
@@ -921,3 +929,4 @@ void test_options()
     }
     printf( "PASS\n" );
 }
+*/
