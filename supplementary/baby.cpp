@@ -9,6 +9,13 @@
  *  ===============
  * 
 
+(These notes need to be updated with a new concept - we now try more than
+5:5 = 25 delta codes, we also try 6:6=36, 7:7=49, 8:8=64 and 9:9=81 with
+progressively more overlap between delta codes and baby codes which is
+great when delta is possible and we don't have to use an escape/sentinel
+too often to resolve the overlap. We try all possibilities, pick a winner
+and prepend an options code to the string to indicate who won) 
+
 The problem; Lichess (and other computer chess systems) often litter PGN chess
 documents with clock times as comments, for example {[%clk 1:29:30]}.
 
@@ -173,7 +180,7 @@ character instead of three ('!' to leave blitzing mode plus mm and ss baby codes
 //
 //  Local data
 //
-static int start_times[] = {90,3,5,10,15,25,60,75};
+static int start_times[] = {90,3,15,25,60,75};
 #define NBR_START_TIMES (sizeof(start_times)/sizeof(start_times[0]))
 static int start_time_counts[NBR_START_TIMES];
 static int delta_range_counts[5];
@@ -186,7 +193,7 @@ static int start_times_count;
 
 // Encode the clock times with one set of configurable options
 static void clk_times_encode_inner( const std::vector<int> &clk_times,
-               std::string &encoded_clk_times, int delta_range ); //, bool use_blitzing );
+               std::string &encoded_clk_times, int delta_range, bool use_blitzing );
 
 // Convert number from 0-59 to alphanumeric character
 //  I'm calling this Babylonian codes, baby codes for short (especially as the idea
@@ -234,18 +241,23 @@ void baby_clk_encode( const std::vector<int> &clk_times, std::string &encoded_cl
 {
     int best_so_far = INT_MAX;
     int delta_range = DELTA_MIN;
-    int winner = delta_range;
+    int  delta_range_winner = delta_range;
+    bool use_blitzing_winner = true;
     for( delta_range=DELTA_MIN; delta_range<=DELTA_MAX; delta_range++ )
     {
-        clk_times_encode_inner( clk_times, encoded_clk_times, delta_range );
-        if( encoded_clk_times.length() < (size_t)best_so_far )
+        for( int i=0; i<2; i++ )
         {
-            winner = delta_range;
-            best_so_far = (int)encoded_clk_times.size();
+            bool use_blitzing = true; // (i>0);
+            clk_times_encode_inner( clk_times, encoded_clk_times, delta_range, use_blitzing );
+            if( encoded_clk_times.length() < (size_t)best_so_far )
+            {
+                delta_range_winner = delta_range;
+                use_blitzing_winner = use_blitzing;
+                best_so_far = (int)encoded_clk_times.size();
+            }
         }
     }
-    delta_range = winner;
-    clk_times_encode_inner( clk_times, encoded_clk_times, delta_range );
+    clk_times_encode_inner( clk_times, encoded_clk_times, delta_range_winner, use_blitzing_winner );
 }
 
 //  Decode from BabyClk string -> array of clock times
@@ -257,6 +269,7 @@ void baby_clk_decode( const std::string &encoded_clk_times, std::vector<int> &cl
     bool white_save;
     int  nbr_ys_in_a_row;
     int  delta_range = DELTA_MIN;
+    bool use_blitzing = true;
 
     // Keep time in seconds, and its hh,mm,ss components in sync as state variables
     int time_w=0, time_b=0;
@@ -282,9 +295,12 @@ void baby_clk_decode( const std::string &encoded_clk_times, std::vector<int> &cl
             {
                 state = delta_w;
                 char start_time_plus_delta_code = c;
+                int x, y, z;
+                options_split( c, x, y, z );
                 int start_time_plus_delta_idx = baby_decode(c);
-                int start_time_idx  = start_time_plus_delta_idx % NBR_START_TIMES;
-                int delta_range_idx = start_time_plus_delta_idx / NBR_START_TIMES;
+                int start_time_idx  = x;
+                int delta_range_idx = y;
+                use_blitzing = (z>0);
                 start_time_counts[start_time_idx]++;
                 delta_range_counts[delta_range_idx]++;
                 delta_range = DELTA_MIN+delta_range_idx;
@@ -433,7 +449,10 @@ void baby_clk_decode( const std::string &encoded_clk_times, std::vector<int> &cl
             case duration_b:
             {
                 baby_b = c;
-                state = (punc_code=='!' ? blitzing : (white_save?delta_w:delta_b));
+                if( use_blitzing )
+                    state = (punc_code=='!' ? blitzing : (white_save?delta_w:delta_b));
+                else
+                    state = (white_save ? delta_w : delta_b);
                 int dur_w, dur_b;
                 duration_decode(punc_code,baby_w,baby_b,dur_w,dur_b,delta_range);
                 #ifdef BABY_DEBUG
@@ -529,7 +548,7 @@ std::string baby_stats_extra()
 
 // Inner encoder, with one set of options. baby_clk_encode() tries every combination and uses the best
 static void clk_times_encode_inner( const std::vector<int> &clk_times,
-                                std::string &encoded_clk_times, int delta_range ) //, bool use_blitzing )
+                                std::string &encoded_clk_times, int delta_range, bool use_blitzing )
 {
     #ifdef BABY_DEBUG
     printf("\nclk_times_encode()\n" );
@@ -568,19 +587,15 @@ static void clk_times_encode_inner( const std::vector<int> &clk_times,
         }
     }
 
-    // Combine start_time, delta_range and use_blitzing into options code
-    // char option_code = options_combine( start_time_idx, delta_idx, use_blitzing );
-    
     // Set the initial time, for encoding and decoding
     int start_time_s = 60 * start_times[start_time_idx];
     int time_w = start_time_s;  // Start time for both sides
     int time_b = start_time_s;
 
-    // Now encode delta time too
+    // Combine start_time, delta_range and use_blitzing into options code
     int  delta_idx = delta_range-DELTA_MIN;
-    int  start_time_plus_delta_idx  = start_time_idx + (delta_idx * NBR_START_TIMES);
-    char start_time_plus_delta_code = baby_encode(start_time_plus_delta_idx);
-    encoded_clk_times += start_time_plus_delta_code;
+    char options_code = options_combine(start_time_idx,delta_idx,use_blitzing?1:0 );
+    encoded_clk_times += options_code;
 
     // Loop taking one element (for absolute coding) or two for (delta coding) at a time
     int len = (int) clk_times.size();
@@ -629,7 +644,7 @@ static void clk_times_encode_inner( const std::vector<int> &clk_times,
                                             //  to indicate delta code is not baby coded mm in blitzing mode
             if( !blitzing_mode || delta_code != '!' )
                 encoded_clk_times += delta_code;
-            blitzing_mode = (delta_code == '!');
+            blitzing_mode = use_blitzing && (delta_code == '!');
             encoded_clk_times += baby_w;    // baby_w always goes first, unless !more
             if( more )
                 encoded_clk_times += baby_b;    // if !more baby_b and baby_w are the same value
