@@ -185,7 +185,8 @@ static int start_times_count;
 //
 
 // Encode the clock times with one set of configurable options
-static void clk_times_encode_inner( const std::vector<int> &clk_times, std::string &encoded_clk_times, int delta_range );
+static void clk_times_encode_inner( const std::vector<int> &clk_times,
+               std::string &encoded_clk_times, int delta_range ); //, bool use_blitzing );
 
 // Convert number from 0-59 to alphanumeric character
 //  I'm calling this Babylonian codes, baby codes for short (especially as the idea
@@ -222,7 +223,8 @@ static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss,
 //
 
 // Encode the clock times efficiently as an alphanumeric string, we call this BabyClk, short for
-//  Babylonian (base-60) clock times 
+//  Babylonian (base-60) clock times. This outer shell just calls an inner function, searching
+//  for the best options.
 void baby_clk_encode( const std::vector<int> &clk_times, std::string &encoded_clk_times )
 {
     int best_so_far = INT_MAX;
@@ -521,7 +523,8 @@ std::string baby_stats_extra()
 //
 
 // Inner encoder, with one set of options. baby_clk_encode() tries every combination and uses the best
-static void clk_times_encode_inner( const std::vector<int> &clk_times, std::string &encoded_clk_times, int delta_range )
+static void clk_times_encode_inner( const std::vector<int> &clk_times,
+                                std::string &encoded_clk_times, int delta_range ) //, bool use_blitzing )
 {
     #ifdef BABY_DEBUG
     printf("\nclk_times_encode()\n" );
@@ -560,6 +563,9 @@ static void clk_times_encode_inner( const std::vector<int> &clk_times, std::stri
         }
     }
 
+    // Combine start_time, delta_range and use_blitzing into options code
+    // char option_code = options_combine( start_time_idx, delta_idx, use_blitzing );
+    
     // Set the initial time, for encoding and decoding
     int start_time_s = 60 * start_times[start_time_idx];
     int time_w = start_time_s;  // Start time for both sides
@@ -855,3 +861,63 @@ static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss,
     out += baby;
 }
 
+#if 0
+char options_combine( int x6, int y5, int z2 )
+{
+    // example 1 [max]) x6=5, y5=4, z2=1
+    // example 2 [min]) x6=0, y5=0, z2=0
+    // example 3 [typ]) x6=3, y5=2, z2=1
+    int val = ((x6+1) * (y5+1) * (z2+1)) - 1; // ex1) 59 , ex2) 0, ex3) 23
+    char baby = baby_encode(val);
+    return baby;
+}
+
+void options_decode( char baby, int &x6, int &y5, int &z2 )
+{                                   // ex1  ex2  ex3   
+    int xyz = baby_decode(baby);    //  59    0   23
+    int z   = xyz % 2;              //   1    0    1
+    int xy  = xyz / 2;              //  29    0   11
+    int y   = xy % 5;               //   4    0    1
+    int x   = xy / 5;               //   5    0    2
+}
+#endif
+
+char options_combine( int x, int y, int z )
+{
+    int val = ((y*6 + x%5) + 1) * (z+1);
+    char baby = baby_encode(val-1);
+    return baby;
+}
+
+void options_decode( char baby, int &x, int &y, int &z )
+{
+    int xyz = baby_decode(baby)+1;
+    z   = (xyz - 1)%2;
+    int xy  = (xyz - 1)/2;
+    y   = xy % 6; 
+    x   = xy / 5; 
+}
+
+
+void test_options()
+{
+    for( int x=0; x<6; x++ )
+    {
+        for( int y=0; y<6; y++ )
+        {
+            for( int z=0; z<2; z++ )
+            {
+                char code = options_combine(x,y,z);
+                int X,Y,Z;
+                options_decode(code,X,Y,Z);
+                bool ok = (x==X && y==Y && z==Z);
+                if( !ok )
+                {
+                    printf( "FAIL x=%d, y=%d, z=%d, code=%d, X=%d, Y=%d, Z=%d\n", x,y,z,baby_decode(code), X,Y,Z );
+                    return;
+                }
+            }
+        }
+    }
+    printf( "PASS\n" );
+}
