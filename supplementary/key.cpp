@@ -139,7 +139,7 @@ void key_update2( std::string &header, const std::string key, const std::string 
 
 void key_update_subkey( std::string &header, const std::string key, const std::string subkey, const std::string subval )
 {
-    printf( "subkey=%s, subval=%s\n", subkey.c_str(), subval.c_str() );
+    // printf( "subkey=%s, subval=%s\n", subkey.c_str(), subval.c_str() );
     std::string current;
     std::string subkey_eq = subkey + '=';
     bool exists = key_find( header, key, current );
@@ -171,7 +171,7 @@ void key_update_subkey( std::string &header, const std::string key, const std::s
             }
             offset++;
         }
-        printf( "subkey=%s, subval=%s found=%s\n", subkey.c_str(), subval.c_str(), found?"true":"false" );
+        // printf( "subkey=%s, subval=%s found=%s\n", subkey.c_str(), subval.c_str(), found?"true":"false" );
         if( !found )
         {
             if( current.length() > 0 )
@@ -185,7 +185,7 @@ void key_update_subkey( std::string &header, const std::string key, const std::s
             if( offset2 == std::string::npos )
                 offset2 = current.length();
             size_t slice = offset2-offset;
-            printf( "replace_once %s\n", subval.c_str() );
+            // printf( "replace_once %s\n", subval.c_str() );
             util::replace_once( current, current.substr(offset,slice), subkey_eq+subval );
         }
         key_replace( header, key, current );
