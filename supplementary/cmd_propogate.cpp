@@ -387,7 +387,7 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                         }
                         else
                         {
-                            printf( "Multiple FIDE ids for name=%s, fide_id=%s, id=%ld\n", name.c_str(), fide_id.c_str(), id );
+                            printf( "Multiple FIDE ids for name=%s, fide_id=%s, id=%ld\n", name.c_str(), fide_id.c_str(), it->second.id );
                             it->second.nbr_games_with_other_ids++;
                             auto it2 = it->second.other_ids.find(id);
                             if( it2 == it->second.other_ids.end() )
@@ -533,13 +533,14 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
             continue;
         }
         PlayerDetails &pd = jt->second;
+        long id_before_possible_update = pd.id;     // see possible update point below
         std::string line = util::sprintf("%-30s", pd.name.c_str() );
         if( pd.match_tier <= TIER_DOES_NOT_HAVE_ID )
             line += util::sprintf("%9s"," " );
         else
         {
             long id = (pd.match_tier < TIER_MANUAL ? pd.id : pd.match.id);
-            pd.id = id;
+            pd.id = id;                             // update point referenced by id_before_possible_update above
             line += util::sprintf( "%9ld", id );
         }
         line += util::sprintf("  %d game%s",
@@ -551,15 +552,18 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                 : util::sprintf( ", (%d-%d)",
                     pd.first_year,
                     pd.last_year );
+        bool show_match = true;
         if( pd.nbr_games_with_id != 0 )
         {
+            show_match = false;
             line += util::sprintf( " %d game%s with id %ld",
                 pd.nbr_games_with_id,
                 pd.nbr_games_with_id==1 ? "" : "s",
-                pd.id
+                id_before_possible_update
             );
             if( pd.nbr_games_with_other_ids != 0 )
             {
+                show_match = true;
                 line += util::sprintf( " %d game%s with %zu other ids",
                     pd.nbr_games_with_other_ids,
                     pd.nbr_games_with_other_ids==1 ? "" : "s",
@@ -574,7 +578,7 @@ int cmd_propogate( std::ifstream &in_aux_manual, std::ifstream &in_aux_loc, std:
                 line += util::sprintf( ")" );
             }
         }
-        else if( pd.match_tier != TIER_NULL )
+        if( show_match && pd.match_tier != TIER_NULL )
         {
             std::string confidence = "(no clashes)";
             if( pd.match.count > 1 )
