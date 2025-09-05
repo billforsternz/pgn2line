@@ -170,8 +170,6 @@ character instead of three ('!' to leave blitzing mode plus mm and ss baby codes
 // 
 
 //#define BABY_DEBUG
-#define DELTA_MIN 5
-#define DELTA_MAX 9
 #define DURATION_OFFSET 30  // defines our 5 minute delta duration window as [-30,4:30) the short
                             //  negative deltas are very useful for blitzed out moves. If two
                             //  consecutive clk values are BOTH in the golden range we can encode
@@ -182,10 +180,149 @@ character instead of three ('!' to leave blitzing mode plus mm and ss baby codes
 //
 static int start_times[] = {90,3,15,25,60,75};
 #define NBR_START_TIMES (sizeof(start_times)/sizeof(start_times[0]))
+#define NBR_DELTA_TABLES 10
 static int start_time_counts[NBR_START_TIMES];
-static int delta_range_counts[5];
+static int delta_range_counts[NBR_DELTA_TABLES];
 static int delta_range_count;
 static int start_times_count;
+static bool has_overlaps;
+static int  nbr_deltas;
+
+const char *delta_0 =
+    "1111111100"
+    "1111100000"
+    "1111000000"
+    "1110000000"
+    "1100000000"
+    "1000000000"
+    "1000000000"
+    "1000000000"
+    "0000000000"
+    "0000000000";
+
+const char *delta_1 =
+    "1111111111"
+    "1111000000"
+    "1110000000"
+    "1100000000"
+    "1000000000"
+    "1000000000"
+    "1000000000"
+    "1000000000"
+    "1000000000"
+    "1000000000";
+
+
+const char *delta_2 =
+    "1111111110"
+    "1111110000"
+    "1111100000"
+    "1111000000"
+    "1110000000"
+    "1100000000"
+    "1000000000"
+    "1000000000"
+    "1000000000"
+    "0000000000";
+
+const char *delta_3 =
+    "1111111100"
+    "1111111100"
+    "1111111100"
+    "1000000000"
+    "0000000000"
+    "0000000000"
+    "0000000000"
+    "0000000000"
+    "0000000000"
+    "0000000000";
+
+const char *delta_4 =
+    "1111000000"
+    "1110000000"
+    "1110000000"
+    "1110000000"
+    "1110000000"
+    "1110000000"
+    "1110000000"
+    "1110000000"
+    "0000000000"
+    "0000000000";
+static bool is_delta_combo[10][10];
+static int delta_value[10][10];
+static int delta_x[100];
+static int delta_y[100];
+
+static void build_delta_tables( int delta_idx )
+{
+    const char *src=NULL;
+    int square=5;
+    switch(delta_idx)
+    {
+        default:
+        case 0: src = delta_0;  break;
+        case 1: src = delta_1;  break;
+        case 2: src = delta_2;  break;
+        case 3: src = delta_3;  break;
+        case 4: src = delta_4;  break;
+        case 5: square=5;   break;
+        case 6: square=6;   break;
+        case 7: square=7;   break;
+        case 8: square=8;   break;
+        case 9: square=9;   break;
+    }
+    if( src )
+    {
+        for( int i=0; i<10; i++ )
+        {
+            for( int j=0; j<10; j++ )
+            {
+                is_delta_combo[i][j] = (*src++ == '1');    
+            }
+        }
+    }
+    else
+    {
+        for( int i=0; i<10; i++ )
+        {
+            for( int j=0; j<10; j++ )
+            {
+                is_delta_combo[i][j] = (i<square && j<square);    
+            }
+        }
+    }
+    int val=0;
+    for( int i=0; i<10; i++ )
+    {
+        for( int j=0; j<10; j++ )
+        {
+            if( is_delta_combo[i][j] )
+                delta_value[i][j] = val++;
+            else
+                delta_value[i][j] = -1;
+        }
+    }
+    nbr_deltas = val;
+    has_overlaps = nbr_deltas>25;
+    for( int i=0; i<100; i++ )
+    {
+        delta_x[i] = -1;
+        delta_y[i] = -1;
+    }
+    for( int i=0; i<10; i++ )
+    {
+        for( int j=0; j<10; j++ )
+        {
+            int val = delta_value[i][j];
+            if( val != -1 )
+            {
+                delta_x[val] = i;
+                delta_y[val] = j;
+            }
+        }
+    }
+}
+
 
 //
 //  Local prototypes
@@ -193,7 +330,7 @@ static int start_times_count;
 
 // Encode the clock times with one set of configurable options
 static void clk_times_encode_inner( const std::vector<int> &clk_times,
-               std::string &encoded_clk_times, int delta_range );
+               std::string &encoded_clk_times, int delta_idx );
 
 // Convert number from 0-59 to alphanumeric character
 //  I'm calling this Babylonian codes, baby codes for short (especially as the idea
@@ -210,24 +347,24 @@ static bool is_punc( char c );
 // Delta encoding, combine punc codes and baby codes to give up to 81 (9x9) characters
 static char delta_encode( int val );
 static int  delta_decode( char delta );
-static bool is_delta( char c, int delta_range );
+static bool is_delta( char c, int delta_idx );
 
 // If possible, encode durations as three characters a punctuation lead in code, then two baby codes
-static bool duration_encode( int duration_w, int duration_b, char &delta_code, char &baby_w, char &baby_b, int delta_range );
+static bool duration_encode( int duration_w, int duration_b, char &delta_code, char &baby_w, char &baby_b, int delta_idx );
 
 // Decode duration coding
-static bool duration_decode( char delta_code, char baby_w, char baby_b, int &duration_w, int &duration_b, int delta_range );
+static bool duration_decode( char delta_code, char baby_w, char baby_b, int &duration_w, int &duration_b, int delta_idx );
 
 // Split hhmmss into components and calculate duration
 static bool clk_times_calc_duration( int time, int hhmmss, int &hh, int &mm, int &ss, int &duration );
 
 // Encode absolute time hhmmss
-static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss, std::string &out, int delta_range );
+static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss, std::string &out, int delta_idx );
 
 // Combine x [0-6), y [0-5), z[0-2) into a single value [0-60)
 //  and baby code it
-static char options_combine( int x, int y, int z );
-static void options_split( char baby, int &x, int &y, int &z );
+static char options_combine( int x, int y );
+static void options_split( char baby, int &x, int &y );
 
 //
 //  Exported functions
@@ -239,17 +376,19 @@ static void options_split( char baby, int &x, int &y, int &z );
 void baby_clk_encode( const std::vector<int> &clk_times, std::string &encoded_clk_times )
 {
     int best_so_far = INT_MAX;
-    int delta_range = DELTA_MIN;
-    int  delta_range_winner = delta_range;
-    for( delta_range=DELTA_MIN; delta_range<=DELTA_MAX; delta_range++ )
+    int delta_idx = 0;
+    int  delta_range_winner = delta_idx;
+    for( delta_idx=0; delta_idx<NBR_DELTA_TABLES; delta_idx++ )
     {
-        clk_times_encode_inner( clk_times, encoded_clk_times, delta_range );
+        build_delta_tables( delta_idx );
+        clk_times_encode_inner( clk_times, encoded_clk_times, delta_idx );
         if( encoded_clk_times.length() < (size_t)best_so_far )
         {
-            delta_range_winner = delta_range;
+            delta_range_winner = delta_idx;
             best_so_far = (int)encoded_clk_times.size();
         }
     }
+    build_delta_tables( delta_range_winner );
     clk_times_encode_inner( clk_times, encoded_clk_times, delta_range_winner );
 }
 
@@ -261,7 +400,7 @@ void baby_clk_decode( const std::string &encoded_clk_times, std::vector<int> &cl
     char punc_code, baby_w, baby_b;
     bool white_save;
     int  nbr_ys_in_a_row;
-    int  delta_range = DELTA_MIN;
+    int  delta_idx = 0;
 
     // Keep time in seconds, and its hh,mm,ss components in sync as state variables
     int time_w=0, time_b=0;
@@ -287,14 +426,13 @@ void baby_clk_decode( const std::string &encoded_clk_times, std::vector<int> &cl
             {
                 state = delta_w;
                 char start_time_plus_delta_code = c;
-                int x, y, z;
-                options_split( c, x, y, z );
-                int start_time_plus_delta_idx = baby_decode(c);
+                int x, y;
+                options_split( c, x, y );
                 int start_time_idx  = x;
-                int delta_range_idx = y;
+                delta_idx = y;
+                build_delta_tables(delta_idx);
                 start_time_counts[start_time_idx]++;
-                delta_range_counts[delta_range_idx]++;
-                delta_range = DELTA_MIN+delta_range_idx;
+                delta_range_counts[delta_idx]++;
                 time_w = time_b = 60 * start_times[start_time_idx];
                 hh_w = hh_b = time_w/3600;
                 mm_w = mm_b = (time_w - hh_w*3600) / 60;
@@ -322,12 +460,12 @@ void baby_clk_decode( const std::string &encoded_clk_times, std::vector<int> &cl
                     state = (white?hour_w:hour_b);
                     nbr_ys_in_a_row = 1;
                 }
-                else if( delta_range>DELTA_MIN && c=='X' )
+                else if( has_overlaps && c=='X' )
                 {
                     // Path 2 to absolute encoding
                     state = (white?minute_w:minute_b);
                 }
-                else if( is_delta(c,delta_range) )
+                else if( is_delta(c,delta_idx) )
                 {
                     punc_code = c;
                     state = duration_w;
@@ -442,7 +580,7 @@ void baby_clk_decode( const std::string &encoded_clk_times, std::vector<int> &cl
                 baby_b = c;
                 state = (punc_code=='!' ? blitzing : (white_save?delta_w:delta_b));
                 int dur_w, dur_b;
-                duration_decode(punc_code,baby_w,baby_b,dur_w,dur_b,delta_range);
+                duration_decode(punc_code,baby_w,baby_b,dur_w,dur_b,delta_idx);
                 #ifdef BABY_DEBUG
                 printf( " %d %d", dur_w, dur_b );
                 #endif
@@ -514,11 +652,11 @@ void baby_clk_decode( const std::string &encoded_clk_times, std::vector<int> &cl
 std::string baby_stats_extra()
 {
     std::string s = "Delta range popularity: ";
-    for( int i=0; i<5; i++ )
+    for( int i=0; i<NBR_DELTA_TABLES; i++ )
     {
         s += util::sprintf("%s%d:%d%s", i==0?"[":",",
-                i+5, delta_range_counts[i],
-                i==5-1?"]\n":"");
+                i, delta_range_counts[i],
+                i==NBR_DELTA_TABLES-1?"]\n":"");
     }
     s += "Start time popularity: ";
     for( int i=0; i<NBR_START_TIMES; i++ )
@@ -536,7 +674,7 @@ std::string baby_stats_extra()
 
 // Inner encoder, with one set of options. baby_clk_encode() tries every combination and uses the best
 static void clk_times_encode_inner( const std::vector<int> &clk_times,
-                                std::string &encoded_clk_times, int delta_range )
+                                std::string &encoded_clk_times, int delta_idx )
 {
     #ifdef BABY_DEBUG
     printf("\nclk_times_encode()\n" );
@@ -580,9 +718,8 @@ static void clk_times_encode_inner( const std::vector<int> &clk_times,
     int time_w = start_time_s;  // Start time for both sides
     int time_b = start_time_s;
 
-    // Combine start_time and delta_range into options code
-    int  delta_idx = delta_range-DELTA_MIN;
-    char options_code = options_combine(start_time_idx,delta_idx,0);
+    // Combine start_time and delta_idx into options code
+    char options_code = options_combine(start_time_idx,delta_idx);
     encoded_clk_times += options_code;
 
     // Loop taking one element (for absolute coding) or two for (delta coding) at a time
@@ -601,7 +738,7 @@ static void clk_times_encode_inner( const std::vector<int> &clk_times,
         int &time1     = white ? time_w     : time_b;
         int &duration1 = white ? duration_w : duration_b;
         bool filler1 = clk_times_calc_duration( time1, hhmmss1, hh, mm, ss, duration1 );
-        clk_times_encode_abs( filler1, time1, hh, mm, ss, emit_abs, delta_range );
+        clk_times_encode_abs( filler1, time1, hh, mm, ss, emit_abs, delta_idx );
 
         // Calculate second half duration (fake it if !more)
         int hhmmss2 = more ? clk_times[i+1] : 0;
@@ -613,7 +750,7 @@ static void clk_times_encode_inner( const std::vector<int> &clk_times,
         char delta_code, baby_w, baby_b;
         if( !more )
             duration2 = duration1;  // set both durations to the first duration if !more
-        bool duration_coding = !filler1 && !filler2 && duration_encode( duration_w, duration_b, delta_code, baby_w, baby_b, delta_range );
+        bool duration_coding = !filler1 && !filler2 && duration_encode( duration_w, duration_b, delta_code, baby_w, baby_b, delta_idx );
 
         // If duration coding , consume both elements
         if( duration_coding )
@@ -773,28 +910,28 @@ static bool is_punc( char c )
     return in_range;
 }
 
-static bool is_delta( char c, int delta_range )
+static bool is_delta( char c, int delta_idx )
 {
     int val = delta_decode( c );
-    bool in_range = (0<=val && val < (delta_range*delta_range));
+    bool in_range = (0<=val && val<nbr_deltas );
     return in_range;
 }
 
 
 
 // If possible, encode durations as three characters a punctuation lead in code, then two baby codes
-static bool duration_encode( int duration_w, int duration_b, char &delta_code, char &baby_w, char &baby_b, int delta_range )
+static bool duration_encode( int duration_w, int duration_b, char &delta_code, char &baby_w, char &baby_b, int delta_idx )
 {
     duration_w += DURATION_OFFSET;
     duration_b += DURATION_OFFSET;
-    bool ok = (0<=duration_w && duration_w<delta_range*60 && 0<=duration_b && duration_b<delta_range*60);
+    int min_w = duration_w/60;
+    int sec_w = duration_w%60;
+    int min_b = duration_b/60;
+    int sec_b = duration_b%60;
+    bool ok = (0<=duration_w && min_w<10 && 0<=duration_b && min_b<10 && is_delta_combo[min_w][min_b] );
     if( ok )
     {
-        int min_w = duration_w/60;
-        int sec_w = duration_w%60;
-        int min_b = duration_b/60;
-        int sec_b = duration_b%60;
-        int idx  = delta_range*min_w + min_b; // 0;0 => 0, 0;1 => 1 ... 1;0 => 5 ... 4;4 => 24 ... 8;8 => 81
+        int idx = delta_value[min_w][min_b];
         delta_code = delta_encode(idx);
         baby_w = baby_encode(sec_w);
         baby_b = baby_encode(sec_b);
@@ -805,15 +942,15 @@ static bool duration_encode( int duration_w, int duration_b, char &delta_code, c
 }
 
 // Decode duration coding
-static bool duration_decode( char delta_code, char baby_w, char baby_b, int &duration_w, int &duration_b, int delta_range )
+static bool duration_decode( char delta_code, char baby_w, char baby_b, int &duration_w, int &duration_b, int delta_idx )
 {
-    if( !is_delta(delta_code,delta_range) )
+    if( !is_delta(delta_code,delta_idx) )
         return false;
     int idx = delta_decode(delta_code);
     int seconds_w = baby_decode(baby_w);
     int seconds_b = baby_decode(baby_b);
-    int min_w = idx/delta_range;
-    int min_b = idx%delta_range;
+    int min_w = delta_x[idx];
+    int min_b = delta_y[idx];
     duration_w = min_w*60 + seconds_w;
     duration_b = min_b*60 + seconds_b;
     duration_w -= DURATION_OFFSET;
@@ -840,7 +977,7 @@ static bool clk_times_calc_duration( int time, int hhmmss, int &hh, int &mm, int
 }
 
 // Encode absolute time hhmmss
-static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss, std::string &out, int delta_range )
+static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss, std::string &out, int delta_idx )
 {
     out.clear();
     if( filler )
@@ -861,7 +998,7 @@ static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss,
 
     // Absolute codes always follow Y codes, and otherwise we need an 'X' to lead in to
     //  the absolute minute and second baby codes
-    else if( delta_range>DELTA_MIN && (is_delta(baby,delta_range) || baby=='X') )  // if the baby code is not unambiguous
+    else if( has_overlaps && (is_delta(baby,delta_idx) || baby=='X') )  // if the baby code is not unambiguous
         out += 'X'; // sentinel
     out += baby;
 
@@ -870,44 +1007,30 @@ static void clk_times_encode_abs( bool filler, int time, int hh, int mm, int ss,
     out += baby;
 }
 
-// Combine x [0-6), y [0-5), z[0-2) into a single value [0-60)
+// Combine x [0-6) and y [0-10) into a single value [0-60)
 //  and baby code it
-static char options_combine( int x, int y, int z )
+static char options_combine( int x, int y )
 {
     int xy = x + y*6;
-    int xyz = xy + z*30;
-    int val = xyz;
-    char baby = baby_encode(val);
+    char baby = baby_encode(xy);
     return baby;
 }
 
-/*     y  0  1  2  3  4 
+/*     y  0  1  2  3  4  5  6  7  8  9
    x
-   0      0  6  12 18 24
-   1      1  7  13 19 25
-   2      2  8  14 20 26
-   3      3  9  15 21 27
-   4      4  10 16 22 28
-   5      5  11 17 23 29
-   
-       z   0   1 
-   xy
-    0      0   30
-    1      1   31
-    2      2   32
-    .            
-    .
-   28     28   58
-   29     29   59
+   0      0  6  12 18 24 30 36 42 48 54
+   1      1  7  13 19 25 31 37 43 49 55
+   2      2  8  14 20 26 32 38 44 50 56
+   3      3  9  15 21 27 33 39 45 51 57
+   4      4  10 16 22 28 34 40 46 52 58
+   5      5  11 17 23 29 35 41 47 53 59
 
 */
-static void options_split( char baby, int &x, int &y, int &z )
+static void options_split( char baby, int &x, int &y )
 {
-    int xyz = baby_decode(baby);
-    z       = xyz/30;
-    int xy  = xyz%30;
-    x       = xy % 6; 
-    y       = xy / 6; 
+    int xy = baby_decode(baby);
+    x      = xy % 6; 
+    y      = xy / 6; 
 }
 
 /*
